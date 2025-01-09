@@ -5,6 +5,8 @@ import argparse
 from pathlib import Path
 from typing import Optional, Type
 
+import numpy as np
+
 from trainer.trainer import Trainer
 from trainer.callbacks import CheckpointCallback, LoggingCallback
 from models.jax_basemodel import JAXCartpoleModel
@@ -15,6 +17,7 @@ from config.config import (
     TrainerConfig,
     CallbackConfig,
     VisualizationConfig,
+    EvalConfig,
 )
 
 
@@ -106,6 +109,19 @@ def parse_args() -> Config:
         "--viz-episodes", type=int, default=3, help="Number of episodes to visualize"
     )
 
+    # Evaluation configuration
+    parser.add_argument(
+        "--checkpoint",
+        type=str,
+        help="Path to checkpoint file for evaluation",
+    )
+    parser.add_argument(
+        "--eval-episodes",
+        type=int,
+        default=10,
+        help="Number of episodes to run in eval mode",
+    )
+
     args = parser.parse_args()
 
     # If config file is provided, load it and override with CLI args
@@ -139,7 +155,13 @@ def parse_args() -> Config:
                 log_file=args.log_file,
             ),
             visualization=VisualizationConfig(
-                enabled=args.visualize, num_episodes=args.viz_episodes
+                enabled=args.visualize,
+                num_episodes=args.viz_episodes,
+            ),
+            eval=EvalConfig(
+                checkpoint_path=args.checkpoint,
+                num_episodes=args.eval_episodes,
+                render=args.visualize,
             ),
         )
 
@@ -149,43 +171,80 @@ def parse_args() -> Config:
 def main():
     config = parse_args()
 
-    # Create environment
-    env = gym.make(
-        config.env_id, render_mode="human" if config.visualization.enabled else None
+    # Create environment with rendering for eval mode or if visualization is enabled
+    render_mode = (
+        "human" if (config.mode == "eval" or config.visualization.enabled) else None
     )
+    env = gym.make(config.env_id, render_mode=render_mode)
 
     # Create model
     model_class = get_model_class(config.model.name)
-    model = model_class(**config.model.params)  # Pass all parameters directly
+    model = model_class(**config.model.params)
 
-    # Set up callbacks
-    callbacks = [
-        CheckpointCallback(
-            save_freq=config.callbacks.checkpoint_freq,
-            save_path=str(
-                Path(config.callbacks.checkpoint_path) / "model_checkpoint.pkl"
+    if config.mode == "eval":
+        if not config.eval.checkpoint_path:
+            raise ValueError("Checkpoint path must be provided for eval mode")
+
+        # Load model checkpoint
+        print(f"Loading checkpoint from {config.eval.checkpoint_path}")
+        model.load_checkpoint(config.eval.checkpoint_path)
+
+        # Run evaluation episodes
+        total_rewards = []
+        for episode in range(config.eval.num_episodes):
+            obs, info = env.reset()
+            done = False
+            episode_reward = 0
+
+            while not done:
+                action = model.predict(obs[None, :])[0]
+                action = np.array([action], dtype=np.int64)[0]
+                obs, reward, terminated, truncated, info = env.step(action)
+                done = terminated or truncated
+                episode_reward += reward
+
+                if config.eval.render:
+                    env.render()
+
+            total_rewards.append(episode_reward)
+            print(
+                f"Episode {episode + 1}/{config.eval.num_episodes}, "
+                f"Reward: {episode_reward:.2f}"
+            )
+
+        print("\nEvaluation Summary:")
+        print(f"Average Reward: {sum(total_rewards) / len(total_rewards):.2f}")
+        print(f"Min Reward: {min(total_rewards):.2f}")
+        print(f"Max Reward: {max(total_rewards):.2f}")
+
+    else:  # Train mode
+        # Set up callbacks
+        callbacks = [
+            CheckpointCallback(
+                save_freq=config.callbacks.checkpoint_freq,
+                save_path=str(
+                    Path(config.callbacks.checkpoint_path) / "model_checkpoint.pkl"
+                ),
             ),
-        ),
-        LoggingCallback(log_file=config.callbacks.log_file),
-    ]
+            LoggingCallback(log_file=config.callbacks.log_file),
+        ]
 
-    # Create trainer
-    trainer = Trainer(
-        model=model,
-        env=env,
-        callbacks=callbacks,
-        gamma=config.trainer.gamma,
-        max_episodes=config.trainer.max_episodes,
-        max_steps_per_episode=config.trainer.max_steps_per_episode,
-    )
+        # Create trainer
+        trainer = Trainer(
+            model=model,
+            env=env,
+            callbacks=callbacks,
+            gamma=config.trainer.gamma,
+            max_episodes=config.trainer.max_episodes,
+            max_steps_per_episode=config.trainer.max_steps_per_episode,
+        )
 
-    if config.mode == "train":
         trainer.train()
 
         if config.visualization.enabled:
             trainer.visualize(num_episodes=config.visualization.num_episodes)
-    else:  # eval mode
-        trainer.visualize(num_episodes=config.visualization.num_episodes)
+
+    env.close()
 
 
 if __name__ == "__main__":

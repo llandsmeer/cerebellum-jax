@@ -1,0 +1,26 @@
+# Mode configuration
+mode = "train"
+env_id = "CartPole-v1"
+
+[model]
+name = "JAXCartpoleModel"
+# All other fields become model parameters
+obs_dim = 4
+hidden_sizes = [64, 64]
+lr = 0.001
+seed = 42
+
+[trainer]
+gamma = 0.99
+max_episodes = 100
+max_steps_per_episode = 500
+
+[callbacks]
+checkpoint_freq = 10
+checkpoint_path = "checkpoints"
+log_file = "baseline_training_log.csv"
+
+[visualization]
+enabled = false
+num_episodes = 3
+render_mode = "human"

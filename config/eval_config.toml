@@ -1,0 +1,11 @@
+mode = "eval"
+env_id = "CartPole-v1"
+
+[model]
+name = "JAXCartpoleModel"
+# Model parameters as needed...
+
+[eval]
+checkpoint_path = "checkpoints/model_checkpoint.pkl"
+num_episodes = 10
+render = true

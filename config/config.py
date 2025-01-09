@@ -32,6 +32,13 @@ class VisualizationConfig:
 
 
 @dataclass
+class EvalConfig:
+    checkpoint_path: Optional[str] = None
+    num_episodes: int = 10
+    render: bool = True
+
+
+@dataclass
 class Config:
     # Mode configuration
     mode: str = "train"  # "train" or "eval"
@@ -45,6 +52,7 @@ class Config:
     trainer: TrainerConfig = field(default_factory=TrainerConfig)
     callbacks: CallbackConfig = field(default_factory=CallbackConfig)
     visualization: VisualizationConfig = field(default_factory=VisualizationConfig)
+    eval: EvalConfig = field(default_factory=EvalConfig)
 
     @classmethod
     def from_toml(cls, path: Union[str, Path]):
@@ -61,11 +69,13 @@ class Config:
         trainer_config = TrainerConfig(**config_dict.pop("trainer", {}))
         callback_config = CallbackConfig(**config_dict.pop("callbacks", {}))
         viz_config = VisualizationConfig(**config_dict.pop("visualization", {}))
+        eval_config = EvalConfig(**config_dict.pop("eval", {}))
 
         return cls(
             model=model_config,
             trainer=trainer_config,
             callbacks=callback_config,
             visualization=viz_config,
+            eval=eval_config,
             **config_dict,
         )
