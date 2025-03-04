@@ -576,7 +576,7 @@ def main():
 def timestep_without_jit(params: Params, state: State, stim: Stim, dt: float):
     """
     Non-JIT version of the timestep function for debugging.
-    This is a simplified version that uses numpy instead of JAX functions.
+    This is identical to the JIT version but uses numpy instead of JAX functions.
     """
     t = state.t + dt
     I = params.Iint + stim.Iinh + stim.Iexc
@@ -585,50 +585,140 @@ def timestep_without_jit(params: Params, state: State, stim: Stim, dt: float):
         + params.gamma2 * stim.Ipf2
         + params.gamma3 * stim.Ipf3
     )
+    zeff = state.z + state.dres
+    zlim = params.eta_z * (
+        params.zmax + (np.where(I > params.Iint, 1, 0) * params.chi * (I - params.Iint))
+    )
 
-    Vs = state.Vs
-    Vd = state.Vd
-    vd1 = state.vd1
-    vd2 = state.vd2
-    vd3 = state.vd3
-    sf2 = state.sf2
-    sf3 = state.sf3
+    eps_z_old = params.eps_z0 - params.Deltaeps_z / (
+        1 + np.exp(-params.l * (zeff - zlim))
+    )
+    eps_z_new = params.eps_z0 - params.Deltaeps_z * 1.0
+    eps_z = eps_z_old * (1 - params.LENNART) + eps_z_new * params.LENNART
+
+    Ca = state.Cas + state.Cad
+    act = 1 / (1 + np.exp(-params.m * (Ca - params.Ca_half)))
+    vCas = params.max_vCas * stim.Icf / (params.Kcf + stim.Icf)
+    vCad = params.max_vCad * Ipf / (params.Kpf + Ipf)
+    alpha = (Ca < params.Ca_half) * (
+        params.slp * (params.Ca_half - Ca)
+        + params.max_alpha / (1 + np.exp(-params.n * (Ca - params.Ca_half)))
+    ) + (Ca > params.Ca_half) * (
+        params.max_alpha / (1 + np.exp(-params.n * (Ca - params.Ca_half)))
+    )
+
+    dot_Vs = (
+        (
+            (params.el - state.Vs) ** 2 * uS**2
+            + params.b * (state.Vs - params.el) * state.ws
+            - state.ws**2
+        )
+        / nA
+        + I
+        - zeff
+        + params.g_sd * (state.Vd - state.Vs)
+    ) / params.C
+    dot_ws = (
+        params.eps
+        * (params.a * (state.Vs - params.el) - state.ws + state.w0 - alpha * Ca)
+        / params.tauw
+    )
+    dot_Vd = (
+        params.g_ds * (state.Vs - state.Vd + params.wiggle_vd)
+        + params.g1 * (state.vd3 - state.Vd)
+        + params.g1 * (state.vd2 - state.Vd)
+        + params.g1 * (state.vd1 - state.Vd)
+        + params.sdsf0
+        * (params.DeltaV)
+        * np.exp((state.Vd - params.vth) / (params.DeltaV))
+        * uS
+        - state.wd
+    ) / params.Cd
+    dot_wd = (params.ad * (state.Vd - params.el) - state.wd) / params.tauw
+    dot_z = -eps_z * state.z / params.tauCa
+    dot_dres = act**params.p * params.dres_coeff * nA / ms - state.dres / params.tauR
+    dot_Cas = (
+        vCas / (1 + np.exp(-params.c * (state.Vs - params.vths)))
+        - state.Cas / params.tauCa
+    )
+    dot_Cad = (
+        vCad
+        * (
+            np.exp((state.vd3 - params.vthd) / (params.DeltaCaV)) * (stim.Ipf3 != 0)
+            + np.exp((state.vd2 - params.vthd) / (params.DeltaCaV)) * (stim.Ipf2 != 0)
+            + np.exp((state.vd1 - params.vthd) / (params.DeltaCaV)) * (stim.Ipf1 != 0)
+        )
+        - state.Cad / params.tauCa
+    )
+    dot_vd3 = (
+        params.g0 * (state.Vd - state.vd3)
+        + params.gl * (params.el - state.vd3 + params.wiggle_vd)
+        + state.sf3
+        * (params.DeltaVsd)
+        * np.exp((state.vd3 - params.vth3) / (params.DeltaVsd))
+        - state.wd3
+        + params.gamma3 * stim.Ipf3
+    ) / params.Csd
+    dot_wd3 = (params.asd * (state.vd3 - params.el) - state.wd3) / (params.tauw)
+    dot_vd2 = (
+        params.g0 * (state.Vd - state.vd2)
+        + params.gl * (params.el - state.vd2 + params.wiggle_vd)
+        + state.sf2
+        * (params.DeltaVsd)
+        * np.exp((state.vd2 - params.vth2) / (params.DeltaVsd))
+        - state.wd2
+        + params.gamma2 * stim.Ipf2
+    ) / params.Csd
+    dot_wd2 = (params.asd * (state.vd2 - params.el) - state.wd2) / params.tauw
+    dot_vd1 = (
+        params.g0 * (state.Vd - state.vd1)
+        + params.gl * (params.el - state.vd1 + params.wiggle_vd)
+        - state.wd1
+        + params.gamma1 * stim.Ipf1
+    ) / params.Csd
+    dot_wd1 = (params.asd * (state.vd1 - params.el) - state.wd1) / params.tauw
+
+    sspike = state.Vs > params.v_sp
+    dspike = state.Vd > params.vd_sp
+    d3spike = state.vd3 > params.vsd_sp
+    d2spike = state.vd2 > params.vsd_sp
+
+    Vs = params.vreset if sspike else state.Vs + dot_Vs * dt
+    ws = params.wreset if sspike else state.ws + dot_ws * dt
+    Vd = params.vreset if dspike else state.Vd + dot_Vd * dt
+    wd = state.wd + dot_wd * dt
+    z = state.z + dot_z * dt
+    dres = state.dres + dot_dres * dt
+    Cas = state.Cas + dot_Cas * dt
+    Cad = state.Cad + dot_Cad * dt
+    vd3 = params.vsd3reset if d3spike else state.vd3 + dot_vd3 * dt
+    wd3 = state.wd3 + dot_wd3 * dt
+    vd2 = params.vsd2reset if d2spike else state.vd2 + dot_vd2 * dt
+    wd2 = state.wd2 + dot_wd2 * dt
+    vd1 = state.vd1 + dot_vd1 * dt
+    wd1 = state.wd1 + dot_wd1 * dt
+    z = (
+        z
+        + sspike * (params.d_z)
+        + d3spike * (params.dsp_coeff * params.d_z)
+        + d2spike * (params.dsp_coeff * params.d_z)
+    )
+    dres = (
+        dres
+        + d3spike * (params.dsp_coeff2 * params.d_z)
+        + d2spike * (params.dsp_coeff2 * params.d_z)
+    )
+    wd = wd + params.wdreset if dspike else wd
+    wd3 = wd3 + params.wsdreset if d3spike else wd3
+    wd2 = wd2 + params.wsdreset if d2spike else wd2
+
+    t_ds3 = state.t_ds3
+    t_ds3 = state.t if d3spike else state.t_ds3
+    t_ds2 = state.t_ds2
+    t_ds2 = state.t if d2spike else state.t_ds2
+    sf2 = params.sdsf2 * (1 - 0.9 * np.exp(-(state.t - state.t_ds2) / params.tau_s2))
+    sf3 = params.sdsf3 * (1 - 0.9 * np.exp(-(state.t - state.t_ds3) / params.tau_s3))
     w0 = state.w0
-    z = state.z
-    dres = state.dres
-    alpha = state.alpha
-    Cas = state.Cas
-    Cad = state.Cad
-    ws = state.ws
-    wd = state.wd
-    wd2 = state.wd2
-    wd3 = state.wd3
-    wd1 = state.wd1
-    eps_z = state.eps_z
-    act = state.act
-
-    Vs = Vs + dt * (-0.1 * Vs + I)
-    Vd = Vd + dt * (-0.1 * Vd + Ipf)
-
-    sspike = Vs > params.vth
-    dspike = Vd > params.vthd
-    d3spike = vd3 > params.vth3
-    d2spike = vd2 > params.vth2
-
-    if sspike:
-        Vs = params.vreset
-        ws = ws + params.wreset
-
-    if dspike:
-        Vd = params.vreset
-        wd = wd + params.wdreset
-
-    ws = ws + dt * (-0.1 * ws)
-    wd = wd + dt * (-0.1 * wd)
-
-    Cas = Cas + dt * (-0.1 * Cas + 0.1 * sspike)
-    Cad = Cad + dt * (-0.1 * Cad + 0.1 * dspike)
-
     state_next = State(
         Vs=Vs,
         Vd=Vd,
@@ -651,14 +741,12 @@ def timestep_without_jit(params: Params, state: State, stim: Stim, dt: float):
         eps_z=eps_z,
         act=act,
         t=t,
-        t_ds3=state.t_ds3,
-        t_ds2=state.t_ds2,
+        t_ds3=t_ds3,
+        t_ds2=t_ds2,
     )
-
     trace = Trace(
         state=state, sspike=sspike, dspike=dspike, d3spike=d3spike, d2spike=d2spike
     )
-
     return state_next, trace
 
 
