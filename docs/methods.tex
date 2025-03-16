@@ -1,0 +1,216 @@
+\section{Methods}
+
+\subsection{Model Architecture}
+
+We implemented a detailed computational model of the olivocerebellar circuit using the BrainPy neural simulation framework. The model consists of four interconnected neural populations forming a closed loop: Parallel Fiber (PF) bundles, Purkinje Cells (PCs), Cerebellar Nuclei (CN) neurons, and Inferior Olive (IO) neurons. This circuit architecture captures the essential components of cerebellar learning and motor control.
+
+The model was constructed with 5 PF bundles providing excitatory input to 100 PCs, which in turn provide inhibitory projections to 40 CN neurons. These CN neurons project inhibitory connections to 64 IO neurons, which complete the loop by sending excitatory climbing fiber inputs back to the PCs. Additionally, IO neurons are interconnected through gap junctions, creating a coupled oscillatory network. The entire implementation leverages JAX-based acceleration through the BrainPy framework, enabling efficient simulation of this complex neural circuit.
+
+\subsection{Neural Populations}
+
+\subsubsection{Parallel Fiber Bundles}
+
+The PF bundles represent the input to the system, modeled as stochastic Ornstein-Uhlenbeck (OU) processes. Each bundle generates a time-varying current according to:
+
+\begin{equation}
+\frac{dI^{(PF)}_{OU}}{dt} = \frac{I^{(PF)}_{OU0} - I^{(PF)}_{OU}}{\tau^{(PF)}_{OU}} + \sigma^{(PF)}_{OU} \cdot \xi \cdot \sqrt{\tau^{(PF)}_{OU}}
+\end{equation}
+
+where $I^{(PF)}_{OU0}$ is the baseline current (0.6 nA), $\tau^{(PF)}_{OU}$ is the time constant (30 ms), $\sigma^{(PF)}_{OU}$ is the noise intensity (0.1), and $\xi$ is a Gaussian random variable with mean $\mu = 0$ and standard deviation $\sigma = 1$.
+
+\subsubsection{Purkinje Cells}
+
+The PC population consists of 100 neurons modeled as adaptive exponential integrate-and-fire (AdEx) neurons. The membrane potential dynamics follow:
+
+\begin{equation}
+C_m \frac{dV}{dt} = -g_L(V - E_L) + g_L \Delta_T e^{\frac{V-V_T}{\Delta_T}} + I_{total} - w
+\end{equation}
+
+\begin{equation}
+\tau_w \frac{dw}{dt} = a(V - E_L) - w
+\end{equation}
+
+where $C_m$ is the membrane capacitance, $g_L$ is the leak conductance, $E_L$ is the resting potential, $V_T$ is the threshold potential, $\Delta_T$ is the slope factor, $w$ is the adaptation variable, $\tau_w$ is the adaptation time constant, and $a$ is the subthreshold adaptation parameter. When the membrane potential exceeds a cutoff value ($V_{cut} = V_T + 5\Delta_T$), a spike is registered, and the membrane potential is reset to $V_r$ while the adaptation variable is incremented by $b$:
+
+\begin{equation}
+\text{At spike: } V \rightarrow V_r; \quad w \rightarrow w + b
+\end{equation}
+
+The total input current to each PC is the sum of an intrinsic current and synaptic inputs from PF bundles:
+
+\begin{equation}
+I_{total} = I_{intrinsic} + I_{PF}
+\end{equation}
+
+\subsubsection{Cerebellar Nuclei}
+
+The CN population consists of 40 neurons also modeled as AdEx neurons with dynamics similar to PCs but with different parameter values. The membrane potential dynamics follow the same equations as for PCs, but with CN-specific parameters. The total input current to each CN neuron includes an intrinsic current and inhibitory input from PCs:
+
+\begin{equation}
+I_{total} = I_{intrinsic} - I_{PC}
+\end{equation}
+
+The inhibitory current from PCs decays exponentially with time constant $\tau_I$:
+
+\begin{equation}
+\frac{dI_{PC}}{dt} = -\frac{I_{PC}}{\tau_I}
+\end{equation}
+
+\subsubsection{Inferior Olive}
+
+The IO population consists of 64 neurons modeled as three-compartment neurons (somatic, dendritic, and axonic). Each compartment has distinct ion channel dynamics and interconnections. The membrane potential dynamics for each compartment are:
+
+\begin{equation}
+\frac{dV_{soma}}{dt} = S \cdot (-I_{leak}^{soma} - I_{interact}^{soma} - I_{channels}^{soma} - I_{input})
+\end{equation}
+
+\begin{equation}
+\frac{dV_{axon}}{dt} = S \cdot (-I_{leak}^{axon} - I_{interact}^{axon} - I_{channels}^{axon})
+\end{equation}
+
+\begin{equation}
+\frac{dV_{dend}}{dt} = S \cdot (-I_{leak}^{dend} - I_{interact}^{dend} - I_{channels}^{dend} - I_{gj})
+\end{equation}
+
+where $S = 1/C_m$ is the inverse of the membrane capacitance, $I_{leak}$ represents leak currents, $I_{interact}$ represents inter-compartmental currents, $I_{channels}$ represents ion channel currents, $I_{input}$ is external input current, and $I_{gj}$ represents gap junction currents.
+
+The soma contains low-threshold T-type calcium channels, sodium channels, delayed rectifier potassium channels, and fast potassium channels. The axon contains sodium and potassium channels. The dendrite contains high-threshold calcium channels, calcium-dependent potassium channels, and h-current channels. Additionally, the dendrite includes calcium dynamics:
+
+\begin{equation}
+\frac{d[Ca^{2+}]}{dt} = -3.0 \cdot I_{Ca_h} - 0.075 \cdot [Ca^{2+}]
+\end{equation}
+
+A key feature of the IO model is the gap junction connectivity between dendritic compartments of different neurons. The gap junction current between two neurons depends on their voltage difference and follows a voltage-dependent conductance:
+
+\begin{equation}
+I_{gj} = (0.2 + 0.8 \cdot e^{-\frac{(V_{dend}^i - V_{dend}^j)^2}{100}}) \cdot (V_{dend}^i - V_{dend}^j) \cdot g_{gj}
+\end{equation}
+
+where $g_{gj}$ is the gap junction conductance (0.05), and the exponential term represents the voltage-dependent modulation of the conductance.
+
+\subsection{Synaptic Connections}
+
+\subsubsection{PF to PC Connection}
+
+Each PC receives excitatory input from all 5 PF bundles with weights initialized using a Dirichlet distribution to ensure they sum to 5 for each PC. The synaptic current is calculated as:
+
+\begin{equation}
+I_{PF} = \frac{1}{5} \sum_{j} w_{j} \cdot I_{j}
+\end{equation}
+
+where $w_j$ is the synaptic weight from the $j$-th PF bundle, and $I_j$ is the current generated by that bundle.
+
+\subsubsection{PC to CN Connection}
+
+Each PC projects to 16 CN neurons, and each CN neuron receives input from approximately 40 PCs. The inhibitory current is incremented upon PC spikes and follows:
+
+\begin{equation}
+\text{At PC spike: } I_{PC} \rightarrow I_{PC} + \gamma_{PC} \cdot \min(n_{active}, 1)
+\end{equation}
+
+where $\gamma_{PC}$ is the synaptic strength (0.004), and $n_{active}$ is the number of active presynaptic PCs.
+
+\subsubsection{CN to IO Connection}
+
+Each CN neuron projects to 10 IO neurons, and each IO neuron receives input from approximately 10 CN neurons. The inhibitory current follows:
+
+\begin{equation}
+\text{At CN spike: } I_{inhib} \rightarrow I_{inhib} + \gamma_{IO} \cdot \frac{n_{active}}{n_{connections}}
+\end{equation}
+
+\begin{equation}
+\frac{dI_{inhib}}{dt} = -\frac{I_{inhib}}{\tau_{inhib}}
+\end{equation}
+
+where $\gamma_{IO}$ is the synaptic strength (0.02), $n_{active}$ is the number of active presynaptic CN neurons, $n_{connections}$ is the number of connections, and $\tau_{inhib}$ is the inhibitory time constant (30 ms).
+
+\subsubsection{IO to PC Connection}
+
+Half of the IO neurons project to PCs, with each projecting IO neuron connecting to approximately 5 PCs, and each PC receiving input from one IO neuron. IO spikes are detected when the axonal voltage crosses 0 mV. In the current implementation, the complex spike effect on PC adaptation is commented out but would normally follow:
+
+\begin{equation}
+\text{At IO spike: } w_{PC} \rightarrow w_{PC} + \gamma_{IO-PC} \cdot \min(n_{active}, 1)
+\end{equation}
+
+where $\gamma_{IO-PC}$ is the complex spike effect strength (0.22), and $n_{active}$ is the number of active presynaptic IO neurons.
+
+\subsection{Gap Junction Connectivity}
+
+The IO neurons are connected through gap junctions in their dendritic compartments. The connectivity is established in a 3D grid with a probability that decreases with distance according to:
+
+\begin{equation}
+P(r) = e^{-(r/4)^2}
+\end{equation}
+
+where $r$ is the Euclidean distance between neurons in the 3D grid. Each IO neuron connects to approximately 10 other neurons through bidirectional gap junctions.
+
+\subsection{Implementation Details}
+
+The model was implemented using BrainPy, a neuronal dynamics simulation framework built on JAX for efficient computation. The implementation leverages vectorized operations through JAX to enable efficient parallel computation across neural populations. Each state variable is integrated using separate ODE integrators with appropriate numerical methods for accuracy and stability. Synaptic connections utilize sparse connectivity representations to optimize memory usage and computational efficiency. Spike propagation is handled through delay mechanisms implemented as length-based queues. To ensure compatibility with JAX's compilation requirements, connectivity information is stored using JAX-friendly formats with dynamic slicing operations. The overall architecture follows a modular design pattern with separate classes for each neural population and connection type, promoting code organization and reusability.
+
+The simulation uses a time step of 0.1 ms and runs for a specified duration (default 1000 ms). State variables are monitored throughout the simulation for analysis and visualization.
+
+\subsection{Parameter Values}
+
+Table \ref{tab:parameters} summarizes the key parameter values used in the model.
+
+\begin{table}[h]
+\centering
+\caption{Parameter values for the olivocerebellar model}
+\label{tab:parameters}
+\begin{tabular}{llll}
+\hline
+\textbf{Component} & \textbf{Parameter} & \textbf{Value} & \textbf{Unit} \\
+\hline
+\multirow{3}{*}{PF Bundles} & $I_{OU0}$ & 0.6 & nA \\
+ & $\tau_{OU}$ & 30.0 & ms \\
+ & $\sigma_{OU}$ & 0.1 & - \\
+\hline
+\multirow{9}{*}{Purkinje Cells} & $C_m$ & 75.0 & pF \\
+ & $g_L$ & 0.03 & $\mu$S \\
+ & $E_L$ & -70.6 & mV \\
+ & $V_T$ & -50.4 & mV \\
+ & $\Delta_T$ & 2.0 & mV \\
+ & $\tau_w$ & 144.0 & ms \\
+ & $a$ & 0.004 & $\mu$S \\
+ & $b$ & 0.0805 & nA \\
+ & $I_{intrinsic}$ & 0.7 & nA \\
+\hline
+\multirow{10}{*}{Cerebellar Nuclei} & $C_m$ & 281.0 & pF \\
+ & $g_L$ & 0.03 & $\mu$S \\
+ & $E_L$ & -70.6 & mV \\
+ & $V_T$ & -50.4 & mV \\
+ & $\Delta_T$ & 2.0 & mV \\
+ & $\tau_w$ & 30.0 & ms \\
+ & $a$ & 0.004 & $\mu$S \\
+ & $b$ & 0.0805 & nA \\
+ & $I_{intrinsic}$ & 1.2 & nA \\
+ & $\tau_I$ & 30.0 & ms \\
+\hline
+\multirow{15}{*}{Inferior Olive} & $g_{int}$ & 0.13 & - \\
+ & $p_1$ & 0.25 & - \\
+ & $p_2$ & 0.15 & - \\
+ & $g_{CaL}$ & 1.4 & - \\
+ & $g_h$ & 0.12 & - \\
+ & $g_{K\_Ca}$ & 35.0 & - \\
+ & $g_{ld}$ & 0.016 & - \\
+ & $g_{la}$ & 0.016 & - \\
+ & $g_{ls}$ & 0.017 & - \\
+ & $g_{Na\_s}$ & 150.0 & - \\
+ & $g_{Kdr\_s}$ & 9.0 & - \\
+ & $g_{K\_s}$ & 5.0 & - \\
+ & $g_{CaH}$ & 4.5 & - \\
+ & $g_{Na\_a}$ & 240.0 & - \\
+ & $g_{K\_a}$ & 20.0 & - \\
+\hline
+\multirow{4}{*}{Synaptic Connections} & $\gamma_{PC}$ & 0.004 & - \\
+ & $\gamma_{IO}$ & 0.02 & - \\
+ & $\gamma_{IO-PC}$ & 0.22 & - \\
+ & $g_{gj}$ & 0.05 & - \\
+\hline
+\multirow{3}{*}{Delays} & PC to CN & 10.0 & ms \\
+ & CN to IO & 5.0 & ms \\
+ & IO to PC & 15.0 & ms \\
+\hline
+\end{tabular}
+\end{table}

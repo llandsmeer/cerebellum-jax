@@ -21,17 +21,17 @@ if __name__ == "__main__":
 
     params = {
         "C": np.full(num_cells, 75.0),  # pF
-        "gL": np.full(num_cells, 30.0),  # nS
+        "gL": np.full(num_cells, 30.0) * 0.001,  # nS to microS
         "EL": np.full(num_cells, -70.6),  # mV
         "VT": np.full(num_cells, -50.4),  # mV
         "DeltaT": np.full(num_cells, 2.0),  # mV
         "tauw": np.full(num_cells, 144.0),  # ms
-        "a": np.full(num_cells, 4.0),  # nS
+        "a": np.full(num_cells, 4.0) * 0.001,  # nS to microS
         "b": np.full(num_cells, 0.0805),  # nA
         "Vr": np.full(num_cells, -70.6),  # mV
         "v_init": np.random.normal(-65.0, 3.0, num_cells),  # mV
         "w_init": np.zeros(num_cells),
-        "I_intrinsic": np.full(num_cells, 0.35),  # nA
+        "I_intrinsic": np.full(num_cells, 1.3),  # nA
     }
 
     # Create the Purkinje cell group

@@ -53,7 +53,7 @@ def run_and_plot_cerebellar_network():
     print("Running cerebellar network simulation...")
 
     # Run the simulation for 1000ms
-    runner = run_simulation(duration=1000.0, dt=0.1)
+    runner = run_simulation(duration=2000.0, dt=0.01)
 
     # Create figure for plotting
     fig = plt.figure(figsize=(15, 15))
@@ -63,7 +63,7 @@ def run_and_plot_cerebellar_network():
     ax1 = fig.add_subplot(gs[0, 0])
     bp.visualize.line_plot(
         runner.mon.ts,
-        runner.mon["pc.V"][:, :5],  # First 5 PCs
+        np.mean(runner.mon["pc.V"], axis=1),  # First 5 PCs
         xlabel="Time (ms)",
         ylabel="Membrane Potential (mV)",
         title="PC Membrane Potentials",
@@ -103,28 +103,27 @@ def run_and_plot_cerebellar_network():
     ax4.set_title("PC Population Firing Frequency")
     ax4.grid(True)
 
-    # Plot PC input currents breakdown
+    # Plot IO membrane potentials
     ax5 = fig.add_subplot(gs[1, 1])
-    mean_pf_input = np.mean(runner.mon["pf.I_OU"], axis=1)
-    mean_adaptation = np.mean(runner.mon["pc.w"], axis=1)
-    ax5.plot(runner.mon.ts, mean_pf_input, label="PF Input")
-    ax5.plot(runner.mon.ts, mean_adaptation, label="Adaptation (w)")
-    ax5.plot(
-        runner.mon.ts, np.full_like(runner.mon.ts, 0.35), label="Intrinsic Current"
+    bp.visualize.line_plot(
+        runner.mon.ts,
+        runner.mon["io.V_soma"][:, :5],  # First 5 IOs
+        xlabel="Time (ms)",
+        ylabel="Membrane Potential (mV)",
+        title="IO Soma Membrane Potentials",
+        ax=ax5,
     )
-    ax5.set_xlabel("Time (ms)")
-    ax5.set_ylabel("Current (nA)")
-    ax5.set_title("PC Input Currents Breakdown")
-    ax5.legend()
-    ax5.grid(True)
 
-    # Plot delta w
+    # Plot CN membrane potentials
     ax6 = fig.add_subplot(gs[1, 2])
-    ax6.plot(runner.mon.ts, runner.mon["pc.dbg_delta_w"])
-    ax6.set_xlabel("Time (ms)")
-    ax6.set_ylabel("Delta w")
-    ax6.set_title("PC Delta w")
-    ax6.grid(True)
+    bp.visualize.line_plot(
+        runner.mon.ts,
+        runner.mon["cn.V"][:, :5],  # First 5 CNs
+        xlabel="Time (ms)",
+        ylabel="Membrane Potential (mV)",
+        title="CN Membrane Potentials",
+        ax=ax6,
+    )
 
     # Plot DCN spike raster
     ax7 = fig.add_subplot(gs[2, 0])
@@ -136,6 +135,30 @@ def run_and_plot_cerebellar_network():
         title="DCN Spike Raster",
         ax=ax7,
     )
+
+    # Plot PF output
+    ax8 = fig.add_subplot(gs[2, 1])
+    bp.visualize.line_plot(
+        runner.mon.ts,
+        runner.mon["pf.I_OU"],
+        xlabel="Time (ms)",
+        ylabel="Current (nA)",
+        title="PF Output Currents",
+        ax=ax8,
+    )
+
+    # Plot PC input currents
+    ax9 = fig.add_subplot(gs[2, 2])
+    mean_pf_input = np.mean(runner.mon["pc.input"], axis=1)
+    ax9.plot(runner.mon.ts, mean_pf_input, label="PF Input")
+    ax9.plot(
+        runner.mon.ts, np.full_like(runner.mon.ts, 0.35), label="Intrinsic Current"
+    )
+    ax9.set_xlabel("Time (ms)")
+    ax9.set_ylabel("Current (nA)")
+    ax9.set_title("PC Input Currents")
+    ax9.legend()
+    ax9.grid(True)
 
     plt.tight_layout()
     plt.savefig("cerebellar_network_simulation.png")

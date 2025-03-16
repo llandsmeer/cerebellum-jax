@@ -73,13 +73,22 @@ class DeepCerebellarNuclei(bp.dyn.NeuDyn):
 
     def dV(self, V, t, w, I_PC):
         """Membrane potential dynamics"""
-        I_total = self.I_intrinsic + self.input.value - I_PC
+        I_total = self.I_intrinsic + self.input.value - I_PC  # nA
         dV = (
-            self.gL * (self.EL - V)
-            + self.gL * self.DeltaT * bm.exp((V - self.VT) / self.DeltaT)
-            + I_total
-            - w
-        ) / self.C
+            1000  # nA to pA
+            * (
+                # microS * mV = nA
+                self.gL * (self.EL - V)
+                # microS * mV = nA
+                + self.gL * self.DeltaT * bm.exp((V - self.VT) / self.DeltaT)
+                # nA
+                + I_total
+                # nA
+                - w
+            )
+            / self.C
+            # pA / pF = mV/ms
+        )
         return dV
 
     def dw(self, w, t, V):
@@ -94,9 +103,9 @@ class DeepCerebellarNuclei(bp.dyn.NeuDyn):
         # Integrate membrane potential and adaptation current
         self.I_PC.value = self.integral_I_PC(self.I_PC, t, dt=dt)
         V = self.integral_V(self.V, t, self.w, self.I_PC, dt=dt)
-        self.V.value = V
+        self.V = V
         w = self.integral_w(self.w, t, self.V, dt=dt)
-        self.w.value = w
+        self.w = w
 
         # Spike detection
         spike = V > self.Vcut

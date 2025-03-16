@@ -43,13 +43,18 @@ class PurkinjeCell(bp.dyn.NeuDyn):
         self.b = bm.asarray(kwargs.get("b"))  # spike-triggered adaptation
         self.Vr = bm.asarray(kwargs.get("Vr"))  # reset potential
 
-        self.dbg_delta_w = bm.Variable(bm.zeros(size))
-
         # State variables
         self.V = bm.Variable(bm.asarray(kwargs.get("v_init")))
         self.w = bm.Variable(bm.asarray(kwargs.get("w_init")))
         self.input = bm.Variable(bm.zeros(size))
         self.I_intrinsic = bm.asarray(kwargs.get("I_intrinsic"))
+
+        # Debug variables for membrane potential terms
+        self.dbg_leak = bm.Variable(bm.zeros(size))
+        self.dbg_exp = bm.Variable(bm.zeros(size))
+        self.dbg_current = bm.Variable(bm.zeros(size))
+        self.dbg_w = bm.Variable(bm.zeros(size))
+        self.dbg_delta_w = bm.Variable(bm.zeros(size))
 
         # Spike tracking
         self.spike = bm.Variable(bm.zeros(self.num, dtype=bool))
@@ -63,15 +68,25 @@ class PurkinjeCell(bp.dyn.NeuDyn):
         """Membrane potential dynamics"""
         I_total = self.I_intrinsic + self.input.value
         dv = (
-            self.gL * (self.EL - V)
-            + self.gL * self.DeltaT * bm.exp((V - self.VT) / self.DeltaT)
-            + I_total
-            - w
-        ) / self.C
+            1000  # nA to pA
+            * (
+                # microS * mV = nA
+                self.gL * (self.EL - V)
+                # microS * mV * 1 = nA
+                + self.gL * self.DeltaT * bm.exp((V - self.VT) / self.DeltaT)
+                # nA
+                + I_total
+                # nA
+                - w
+            )
+            / self.C
+            # pA / pF = mV/ms
+        )
         return dv
 
     def dw(self, w, t, V):
         """Adaptation current dynamics"""
+        #    microS * mV = nA            # nA  # ms
         dw = (self.a * (V - self.EL) - w) / self.tauw
         return dw
 
@@ -81,10 +96,17 @@ class PurkinjeCell(bp.dyn.NeuDyn):
 
         # Integrate membrane potential and adaptation current
         V = self.integral_v(self.V, t, self.w, dt=dt)
-        self.V.value = V
+        self.V = V
         w = self.integral_w(self.w, t, self.V, dt=dt)
-        self.dbg_delta_w.value = w - self.w.value
-        self.w.value = w
+        self.w = w
+
+        # Store individual terms for debugging
+        I_total = self.I_intrinsic + self.input.value
+        self.dbg_leak.value = self.gL * (self.EL - V)
+        self.dbg_exp.value = self.gL * self.DeltaT * bm.exp((V - self.VT) / self.DeltaT)
+        self.dbg_current.value = I_total
+        self.dbg_w.value = w
+        self.dbg_delta_w.value = (self.a * (V - self.EL) - w) / self.tauw
 
         # Spike detection
         spike = V > self.Vcut

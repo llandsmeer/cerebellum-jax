@@ -14,9 +14,9 @@ class PFBundles(bp.dyn.NeuDyn):
         super().__init__(size=num_bundles)
 
         # Parameters
-        self.I_OU0 = bm.asarray(kwargs.get("I_OU0", 1.3))
-        self.tau_OU = bm.asarray(kwargs.get("tau_OU", 50.0))
-        self.sigma_OU = bm.asarray(kwargs.get("sigma_OU", 0.25))
+        self.I_OU0 = bm.asarray(kwargs.get("I_OU0", 0.6))
+        self.tau_OU = bm.asarray(kwargs.get("tau_OU", 30.0))
+        self.sigma_OU = bm.asarray(kwargs.get("sigma_OU", 0.1))
 
         # State variables
         self.I_OU = bm.Variable(bm.ones(self.num) * self.I_OU0)
@@ -63,7 +63,7 @@ class PFtoPC(bp.dyn.SynConn):
             self.weights = bm.Variable(bm.asarray(weights))
 
     def update(self):
-        pre_I = self.pre.I_OU
+        pre_I = self.pre.I_OU.value
         post_input = bm.zeros(self.post.num)
 
         for i in self.connected_neurons:
@@ -73,10 +73,10 @@ class PFtoPC(bp.dyn.SynConn):
             weights_i = bm.take(self.weights[i], pre_ids)
             pre_I_connected = bm.take(pre_I, pre_ids)
 
-            contribution = bm.sum(weights_i * pre_I_connected) / bm.maximum(length, 1)
+            contribution = (1 / 5) * bm.sum(weights_i * pre_I_connected)
             post_input = post_input.at[i].set(contribution)
 
-        self.post.input += post_input
+        self.post.input = post_input
 
 
 class PCToCN(bp.dyn.SynConn):
@@ -209,29 +209,29 @@ class CerebellarNetwork(bp.DynSysGroup):
         # Create PC population
         pc_params = {
             "C": np.full(num_pc, 75.0),
-            "gL": np.full(num_pc, 30.0),
+            "gL": np.full(num_pc, 30.0) * 0.001,  # nS to microS
             "EL": np.full(num_pc, -70.6),
             "VT": np.full(num_pc, -50.4),
             "DeltaT": np.full(num_pc, 2.0),
             "tauw": np.full(num_pc, 144.0),
-            "a": np.full(num_pc, 4.0),
+            "a": np.full(num_pc, 4.0) * 0.001,  # nS to microS
             "b": np.full(num_pc, 0.0805),
             "Vr": np.full(num_pc, -70.6),
             "v_init": np.random.normal(-65.0, 3.0, num_pc),
             "w_init": np.zeros(num_pc),
-            "I_intrinsic": np.full(num_pc, 0.35),
+            "I_intrinsic": np.full(num_pc, 0.7),
         }
         self.pc = PurkinjeCell(num_pc, **pc_params)
 
         # Create CN population
         cn_params = {
             "C": np.full(num_cn, 281.0),
-            "gL": np.full(num_cn, 30.0),
+            "gL": np.full(num_cn, 30.0) * 0.001,  # nS to microS
             "EL": np.full(num_cn, -70.6),
             "VT": np.full(num_cn, -50.4),
             "DeltaT": np.full(num_cn, 2.0),
             "tauw": np.full(num_cn, 30.0),
-            "a": np.full(num_cn, 4.0),
+            "a": np.full(num_cn, 4.0) * 0.001,  # nS to microS
             "b": np.full(num_cn, 0.0805),
             "Vr": np.full(num_cn, -65.0),
             "v_init": np.random.normal(-65.0, 3.0, num_cn),
@@ -292,6 +292,11 @@ def run_simulation(duration=1000.0, dt=0.1):
         "pc.spike": net.pc.spike,
         "pc.w": net.pc.w,
         "pc.dbg_delta_w": net.pc.dbg_delta_w,
+        "pc.input": net.pc.input,
+        "pc.dbg_leak": net.pc.dbg_leak,
+        "pc.dbg_exp": net.pc.dbg_exp,
+        "pc.dbg_current": net.pc.dbg_current,
+        "pc.dbg_w": net.pc.dbg_w,
         "cn.V": net.cn.V,
         "cn.spike": net.cn.spike,
         "cn.I_PC": net.cn.I_PC,
