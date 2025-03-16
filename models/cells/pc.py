@@ -60,7 +60,6 @@ class PurkinjeCell(bp.dyn.NeuDyn):
                 v_init: Initial membrane potential (mV)
                 w_init: Initial adaptation variable
                 I_intrinsic: Intrinsic current (nA)
-                I_Noise: Noise current (nA)
                 t_ref: Refractory period (ms)
 
                 # PF parameters
@@ -101,10 +100,10 @@ class PurkinjeCell(bp.dyn.NeuDyn):
         )  # CSpk induced LTD time constant
 
         # State variables
-        self.v = bm.Variable(bm.asarray(kwargs.get("v_init")))
+        self.V = bm.Variable(bm.asarray(kwargs.get("v_init")))
         self.w = bm.Variable(bm.asarray(kwargs.get("w_init")))
+        self.input = bm.Variable(bm.zeros(size))
         self.I_intrinsic = bm.asarray(kwargs.get("I_intrinsic"))
-        self.I_Noise = bm.asarray(kwargs.get("I_Noise"))
 
         # Spike tracking
         self.spike = bm.Variable(bm.zeros(self.num, dtype=bool))
@@ -137,20 +136,20 @@ class PurkinjeCell(bp.dyn.NeuDyn):
         # PF synaptic current
         self.I_PF = bm.Variable(bm.zeros(size))
 
-    def dv(self, v, t, w):
+    def dv(self, V, t, w):
         """Membrane potential dynamics"""
-        I_total = self.I_intrinsic + self.I_Noise + self.I_PF
+        I_total = self.I_intrinsic + self.input.value + self.I_PF
         dv = (
-            self.gL * (self.EL - v)
-            + self.gL * self.DeltaT * bm.exp((v - self.VT) / self.DeltaT)
+            self.gL * (self.EL - V)
+            + self.gL * self.DeltaT * bm.exp((V - self.VT) / self.DeltaT)
             + I_total
             - w
         ) / self.C
         return dv
 
-    def dw(self, w, t, v):
+    def dw(self, w, t, V):
         """Adaptation current dynamics"""
-        dw = (self.a * (v - self.EL) - w) / self.tauw
+        dw = (self.a * (V - self.EL) - w) / self.tauw
         return dw
 
     def update(self):
@@ -164,18 +163,18 @@ class PurkinjeCell(bp.dyn.NeuDyn):
         self.I_PF.value = I_PF_total / self.num_pf
 
         # Integrate membrane potential and adaptation current
-        v = self.integral_v(self.v, t, self.w, dt=dt)
-        w = self.integral_w(self.w, t, self.v, dt=dt)
+        V = self.integral_v(self.V, t, self.w, dt=dt)
+        w = self.integral_w(self.w, t, self.V, dt=dt)
 
         # Spike detection
-        spike = v > self.Vcut
+        spike = V > self.Vcut
         self.spike.value = spike
 
         # Update last spike time
         self.t_last_spike.value = bm.where(spike, t, self.t_last_spike)
 
         # Reset membrane potential and update adaptation for spiking neurons
-        self.v.value = bm.where(spike, self.Vr, v)
+        self.V.value = bm.where(spike, self.Vr, V)
         self.w.value = bm.where(spike, w + self.b, w)
 
     def update_pf_weights(self, climbing_fiber_spikes):
@@ -215,7 +214,6 @@ if __name__ == "__main__":
         "v_init": np.random.normal(-65.0, 3.0, num_cells),  # mV
         "w_init": np.zeros(num_cells),
         "I_intrinsic": np.full(num_cells, 0.35),  # nA
-        "I_Noise": np.zeros(num_cells),  # nA
         # PF parameters
         "theta_M0": np.full(num_cells, 60.0),  # Hz
         "tau_M": np.full(num_cells, 15.0),  # ms
@@ -231,15 +229,15 @@ if __name__ == "__main__":
     PC = PurkinjeCell(num_cells, **params)
 
     # Set up the simulation runner and monitors
-    runner = bp.DSRunner(PC, monitors=["v", "w", "spike", "I_PF", "pf_weights"], dt=0.1)
+    runner = bp.DSRunner(PC, monitors=["V", "w", "spike", "I_PF", "pf_weights"], dt=0.1)
 
     print("Running...")
     # Run the simulation for 1000 ms
     runner.run(1000.0)
     print("Done!")
 
-    print(f"Max v: {runner.mon.v.max()}")
-    print(f"Min v: {runner.mon.v.min()}")
+    print(f"Max V: {runner.mon.V.max()}")
+    print(f"Min V: {runner.mon.V.min()}")
     print(f"Max w: {runner.mon.w.max()}")
     print(f"Min w: {runner.mon.w.min()}")
     print(f"Num spikes: {runner.mon.spike.sum()}")
@@ -251,9 +249,9 @@ if __name__ == "__main__":
     # Plot membrane potentials
     bp.visualize.line_plot(
         runner.mon.ts,
-        runner.mon.v,
+        runner.mon.V,
         xlabel="Time (ms)",
-        ylabel="v (mV)",
+        ylabel="V (mV)",
         title="Purkinje cell membrane potential",
         ax=ax1,
     )

@@ -1,8 +1,3 @@
-import os
-
-# Configure JAX to use CPU
-os.environ["JAX_PLATFORM_NAME"] = "cpu"
-
 import brainpy as bp
 import brainpy.math as bm
 import numpy as np
@@ -28,7 +23,6 @@ class DeepCerebellarNuclei(bp.dyn.NeuDyn):
                 v_init: Initial membrane potential (mV)
                 w_init: Initial adaptation variable
                 I_intrinsic: Intrinsic current (nA)
-                I_Noise: Noise current (nA)
                 tauI: PC inhibition time constant (ms)
                 I_PC_max: Maximum PC inhibition current (nA)
 
@@ -57,10 +51,10 @@ class DeepCerebellarNuclei(bp.dyn.NeuDyn):
         )  # PC inhibition time constant (ms)
 
         # State variables
-        self.v = bm.Variable(bm.asarray(kwargs.get("v_init", -70.6)))
+        self.V = bm.Variable(bm.asarray(kwargs.get("v_init", -70.6)))
         self.w = bm.Variable(bm.asarray(kwargs.get("w_init", 0.0)))
+        self.input = bm.Variable(bm.zeros(size))
         self.I_intrinsic = bm.asarray(kwargs.get("I_intrinsic", 0.35))
-        self.I_Noise = bm.asarray(kwargs.get("I_Noise", 0.0))
 
         # PC inhibition
         self.I_PC = bm.Variable(bm.zeros(self.num))
@@ -74,68 +68,39 @@ class DeepCerebellarNuclei(bp.dyn.NeuDyn):
         self.integral_v = bp.odeint(f=self.dv, method="exp_auto")
         self.integral_w = bp.odeint(f=self.dw, method="exp_auto")
 
-        # Initialize MF inputs with OU processes
-        self.num_mf = kwargs.get("num_mf", 5)
-        self.mf_processes = []
-        for _ in range(self.num_mf):
-            self.mf_processes.append(
-                OUProcess(
-                    size=size,
-                    I_OU0=kwargs.get("I_OU0_MF", 1.3),  # nA
-                    tau_OU=kwargs.get("tau_OU_MF", 50.0),  # ms
-                    sigma_OU=kwargs.get("sigma_OU_MF", 0.25),
-                )
-            )
-
-        # Initialize MF weights from scaled Dirichlet distribution
-        alpha = 2.0  # concentration parameter > 1 favors center of simplex
-        raw_weights = np.random.dirichlet(alpha * np.ones(self.num_mf), size=size)
-        self.mf_weights = bm.Variable(
-            bm.asarray(raw_weights * 5.0)
-        )  # Scale to sum to 5
-
-        # MF synaptic current
-        self.I_MF = bm.Variable(bm.zeros(size))
-
-    def dv(self, v, t, w):
+    def dv(self, V, t, w):
         """Membrane potential dynamics"""
-        I_total = self.I_intrinsic + self.I_Noise + self.I_MF - self.I_PC
+        I_total = self.I_intrinsic + self.input.value - self.I_PC
         dv = (
-            self.gL * (self.EL - v)
-            + self.gL * self.DeltaT * bm.exp((v - self.VT) / self.DeltaT)
+            self.gL * (self.EL - V)
+            + self.gL * self.DeltaT * bm.exp((V - self.VT) / self.DeltaT)
             + I_total
             - w
         ) / self.C
         return dv
 
-    def dw(self, w, t, v):
+    def dw(self, w, t, V):
         """Adaptation current dynamics"""
-        dw = (self.a * (v - self.EL) - w) / self.tauw
+        dw = (self.a * (V - self.EL) - w) / self.tauw
         return dw
 
     def update(self):
         t = bp.share["t"]
         dt = bp.share["dt"]
 
-        # Update MF OU processes and calculate total MF current
-        I_MF_total = bm.zeros_like(self.I_MF)
-        for i, mf in enumerate(self.mf_processes):
-            I_MF_total += self.mf_weights[:, i] * mf.update(dt)
-        self.I_MF.value = I_MF_total / self.num_mf
-
         # Integrate membrane potential and adaptation current
-        v = self.integral_v(self.v, t, self.w, dt=dt)
-        w = self.integral_w(self.w, t, self.v, dt=dt)
+        V = self.integral_v(self.V, t, self.w, dt=dt)
+        w = self.integral_w(self.w, t, self.V, dt=dt)
 
         # Spike detection
-        spike = v > self.Vcut
+        spike = V > self.Vcut
         self.spike.value = spike
 
         # Update last spike time
         self.t_last_spike.value = bm.where(spike, t, self.t_last_spike)
 
         # Reset membrane potential and update adaptation for spiking neurons
-        self.v.value = bm.where(spike, self.Vr, v)
+        self.V.value = bm.where(spike, self.Vr, V)
         self.w.value = bm.where(spike, w + self.b, w)
 
     def update_pc_inhibition(self, pc_spikes):
@@ -154,6 +119,8 @@ class DeepCerebellarNuclei(bp.dyn.NeuDyn):
 
 
 if __name__ == "__main__":
+    bm.set_platform("cpu")
+
     # Define number of DCN cells
     num_cells = 50
 
@@ -170,22 +137,15 @@ if __name__ == "__main__":
         "v_init": np.random.normal(-65.0, 3.0, num_cells),  # mV
         "w_init": np.zeros(num_cells),
         "I_intrinsic": np.full(num_cells, 0.35),  # nA
-        "I_Noise": np.zeros(num_cells),  # nA
         "tauI": np.full(num_cells, 30.0),  # ms
         "I_PC_max": np.zeros(num_cells),  # nA
-        # MF parameters
-        "I_OU0_MF": 1.3,  # nA
-        "tau_OU_MF": 50.0,  # ms
-        "sigma_OU_MF": 0.25,
     }
 
     # Create the DCN cell group
     DCN = DeepCerebellarNuclei(num_cells, **params)
 
     # Set up the simulation runner and monitors
-    runner = bp.DSRunner(
-        DCN, monitors=["v", "w", "spike", "I_MF", "I_PC", "mf_weights"], dt=0.1
-    )
+    runner = bp.DSRunner(DCN, monitors=["V", "w", "spike", "I_PC", "I_PC_max"], dt=0.1)
 
     print("Running...")
     # Run the simulation for 1000 ms
@@ -197,7 +157,6 @@ if __name__ == "__main__":
     print(f"Max w: {runner.mon.w.max()}")
     print(f"Min w: {runner.mon.w.min()}")
     print(f"Num spikes: {runner.mon.spike.sum()}")
-    print(f"Mean MF current: {runner.mon.I_MF.mean()}")
     print(f"Mean PC inhibition: {runner.mon.I_PC.mean()}")
 
     # Create a figure with subplots
@@ -230,21 +189,13 @@ if __name__ == "__main__":
     # Plot MF currents
     bp.visualize.line_plot(
         runner.mon.ts,
-        runner.mon.I_MF,
+        runner.mon.I_PC,
         xlabel="Time (ms)",
-        ylabel="I_MF (nA)",
-        title="Mossy fiber currents",
+        ylabel="I_PC (nA)",
+        title="PC inhibition",
         ax=ax3,
     )
-    ax3.set_title("Mossy fiber currents")
-
-    # Plot final MF weights distribution
-    final_weights = runner.mon.mf_weights[-1]
-    ax4.boxplot(
-        [final_weights[:, i] for i in range(5)], labels=[f"MF {i+1}" for i in range(5)]
-    )
-    ax4.set_ylabel("Weight")
-    ax4.set_title("Final MF weights distribution")
+    ax3.set_title("PC inhibition")
 
     plt.tight_layout()
     plt.show()

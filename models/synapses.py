@@ -1,15 +1,6 @@
-import os
-
-# Configure JAX to use CPU
-os.environ["JAX_PLATFORM_NAME"] = "cpu"
-
 import brainpy as bp
 import brainpy.math as bm
 import numpy as np
-from typing import Union, Callable, Optional, Tuple, List, Dict, Any
-
-from models.cells.pc import PurkinjeCell, OUProcess
-from models.cells.dcn import DeepCerebellarNuclei
 
 
 class RateMeasurement(bp.dyn.SynConn):
