@@ -26,11 +26,33 @@ from models.cells.io_numpy import (
 )
 
 # We'll import our BrainPy implementation once it's created
-from models.cells.io import IONeuron, IONetwork
+from models.cells.io import IONeuron, IONetwork, make_initial_io_state
 
 # Set random seed for reproducibility
 np.random.seed(42)
 bm.random.seed(42)
+
+
+def randomize_parameters(base_value, n_cells, cv=0.05):
+    """
+    Add Gaussian noise to a parameter value.
+
+    Parameters
+    ----------
+    base_value : float
+        Base parameter value
+    n_cells : int
+        Number of cells
+    cv : float, optional
+        Coefficient of variation (standard deviation / mean)
+
+    Returns
+    -------
+    array
+        Array of randomized parameter values
+    """
+    std_dev = base_value * cv
+    return base_value + bm.random.normal(0, std_dev, n_cells)
 
 
 def test_original_io():
@@ -114,13 +136,39 @@ def test_brainpy_io():
     # Add heterogeneity in CaL conductance as in the original
     g_CaL = 0.5 + 1.2 * bm.random.random(n_cells)
 
-    # Create the IO network
+    # Randomize other parameters with small Gaussian noise (5% coefficient of variation)
+    g_int = randomize_parameters(0.13, n_cells, cv=0.05)
+    g_h = randomize_parameters(0.12, n_cells, cv=0.05)
+    g_K_Ca = randomize_parameters(35.0, n_cells, cv=0.05)
+    g_ld = randomize_parameters(0.01532, n_cells, cv=0.05)
+    g_la = randomize_parameters(0.016, n_cells, cv=0.05)
+    g_ls = randomize_parameters(0.016, n_cells, cv=0.05)
+    g_Na_s = randomize_parameters(150.0, n_cells, cv=0.05)
+    g_Kdr_s = randomize_parameters(9.0, n_cells, cv=0.05)
+    g_K_s = randomize_parameters(5.0, n_cells, cv=0.05)
+    g_CaH = randomize_parameters(4.5, n_cells, cv=0.05)
+    g_Na_a = randomize_parameters(240.0, n_cells, cv=0.05)
+    g_K_a = randomize_parameters(240.0, n_cells, cv=0.05)
+
+    # Create the IO network with randomized parameters
     io_network = IONetwork(
         num_neurons=n_cells,
-        g_gj=0.05,
+        g_gj=0.5,
         rmax=4,
         nconnections=10,
-        g_CaL=g_CaL,  # Pass the heterogeneous conductance directly
+        g_CaL=g_CaL,  # Heterogeneous CaL conductance
+        g_int=g_int,
+        g_h=g_h,
+        g_K_Ca=g_K_Ca,
+        g_ld=g_ld,
+        g_la=g_la,
+        g_ls=g_ls,
+        g_Na_s=g_Na_s,
+        g_Kdr_s=g_Kdr_s,
+        g_K_s=g_K_s,
+        g_CaH=g_CaH,
+        g_Na_a=g_Na_a,
+        g_K_a=g_K_a,
     )
 
     # Create a runner to simulate the model
@@ -139,17 +187,17 @@ def test_brainpy_io():
     # Plot the results
     plt.figure(figsize=(12, 8))
     plt.subplot(3, 1, 1)
-    plt.plot(runner.mon.ts, runner.mon["neurons.V_soma"][:, :5])
+    plt.plot(runner.mon.ts, np.mean(runner.mon["neurons.V_soma"], axis=1))
     plt.title("BrainPy IO Model - Soma Membrane Potentials")
     plt.ylabel("Voltage (mV)")
 
     plt.subplot(3, 1, 2)
-    plt.plot(runner.mon.ts, runner.mon["neurons.V_axon"][:, :5])
+    plt.plot(runner.mon.ts, np.mean(runner.mon["neurons.V_axon"], axis=1))
     plt.title("BrainPy IO Model - Axon Membrane Potentials")
     plt.ylabel("Voltage (mV)")
 
     plt.subplot(3, 1, 3)
-    plt.plot(runner.mon.ts, runner.mon["neurons.V_dend"][:, :5])
+    plt.plot(runner.mon.ts, np.mean(runner.mon["neurons.V_dend"], axis=1))
     plt.title("BrainPy IO Model - Dendrite Membrane Potentials")
     plt.xlabel("Time (ms)")
     plt.ylabel("Voltage (mV)")

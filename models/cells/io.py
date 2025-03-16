@@ -116,25 +116,27 @@ class IONeuron(bp.dyn.NeuDyn):
         self.V_h = V_h
         self.V_l = V_l
 
+        init_state = make_initial_io_state(size)
+
         # Initialize state variables
-        self.V_soma = bm.Variable(bm.random.normal(-60, 3, size))
-        self.soma_k = bm.Variable(bm.ones(size) * 0.7423159)
-        self.soma_l = bm.Variable(bm.ones(size) * 0.0321349)
-        self.soma_h = bm.Variable(bm.ones(size) * 0.3596066)
-        self.soma_n = bm.Variable(bm.ones(size) * 0.2369847)
-        self.soma_x = bm.Variable(bm.ones(size) * 0.1)
+        self.V_soma = bm.Variable(init_state["V_soma"])
+        self.soma_k = bm.Variable(init_state["soma_k"])
+        self.soma_l = bm.Variable(init_state["soma_l"])
+        self.soma_h = bm.Variable(init_state["soma_h"])
+        self.soma_n = bm.Variable(init_state["soma_n"])
+        self.soma_x = bm.Variable(init_state["soma_x"])
 
         self.input = bm.Variable(bm.zeros(size))
 
-        self.V_axon = bm.Variable(bm.random.normal(-60, 3, size))
-        self.axon_Sodium_h = bm.Variable(bm.ones(size) * 0.9)
-        self.axon_Potassium_x = bm.Variable(bm.ones(size) * 0.2369847)
+        self.V_axon = bm.Variable(init_state["V_axon"])
+        self.axon_Sodium_h = bm.Variable(init_state["axon_Sodium_h"])
+        self.axon_Potassium_x = bm.Variable(init_state["axon_Potassium_x"])
 
-        self.V_dend = bm.Variable(bm.random.normal(-60, 3, size))
-        self.dend_Ca2Plus = bm.Variable(bm.ones(size) * 3.715)
-        self.dend_Calcium_r = bm.Variable(bm.ones(size) * 0.0113)
-        self.dend_Potassium_s = bm.Variable(bm.ones(size) * 0.0049291)
-        self.dend_Hcurrent_q = bm.Variable(bm.ones(size) * 0.0337836)
+        self.V_dend = bm.Variable(init_state["V_dend"])
+        self.dend_Ca2Plus = bm.Variable(init_state["dend_Ca2Plus"])
+        self.dend_Calcium_r = bm.Variable(init_state["dend_Calcium_r"])
+        self.dend_Potassium_s = bm.Variable(init_state["dend_Potassium_s"])
+        self.dend_Hcurrent_q = bm.Variable(init_state["dend_Hcurrent_q"])
 
         # Initialize ODE integrators - one for each variable
         self.integral_V_soma = bp.odeint(f=self.dV_soma, method=method)
