@@ -26,7 +26,7 @@ class PFBundles(bp.dyn.NeuDyn):
         xi = bm.random.normal(0, 1, self.num)
         dI_OU = (
             (self.I_OU0 - self.I_OU) / self.tau_OU
-            + self.sigma_OU * bm.sqrt(2.0 / self.tau_OU) * xi
+            + self.sigma_OU * bm.sqrt(self.tau_OU) * xi
         ) * dt
 
         self.I_OU.value = self.I_OU + dI_OU
@@ -38,7 +38,6 @@ class PFtoPC(bp.dyn.SynConn):
         super().__init__(pre=pre, post=post, conn=conn, name=name)
 
         (self.indices, self.indptr) = self.conn.require("post2pre")
-        # Store connectivity information in a more JAX-friendly format
         self.conn_mat = {}
         self.connected_neurons = []
         for i in range(post.num):
@@ -67,18 +66,13 @@ class PFtoPC(bp.dyn.SynConn):
         pre_I = self.pre.I_OU
         post_input = bm.zeros(self.post.num)
 
-        # Process only connected neurons
         for i in self.connected_neurons:
             start, length = self.conn_mat[i]
-            # Use dynamic_slice instead of standard slicing
             pre_ids = lax.dynamic_slice(self.indices, (start,), (length,))
 
-            # Get weights and inputs for connected pre-synaptic neurons
             weights_i = bm.take(self.weights[i], pre_ids)
             pre_I_connected = bm.take(pre_I, pre_ids)
 
-            # Use where to handle the case when length might be 0
-            # This avoids the boolean conditional
             contribution = bm.sum(weights_i * pre_I_connected) / bm.maximum(length, 1)
             post_input = post_input.at[i].set(contribution)
 
@@ -86,9 +80,10 @@ class PFtoPC(bp.dyn.SynConn):
 
 
 class PCToCN(bp.dyn.SynConn):
-    def __init__(self, pre, post, conn, delay=10.0, name=None):
+    def __init__(self, pre, post, conn, delay=10.0, gamma_PC=0.004, name=None):
         super().__init__(pre=pre, post=post, conn=conn, name=name)
 
+        self.gamma_PC = gamma_PC
         self.delay = delay
         (self.indices, self.indptr) = self.conn.require("pre2post")
         self.delay_length = int(delay / bp.share["dt"])  # Convert time delay to steps
@@ -111,21 +106,24 @@ class PCToCN(bp.dyn.SynConn):
         # Process only connected neurons
         for i in self.connected_neurons:
             start, length = self.conn_mat[i]
-            # Use dynamic_slice instead of standard slicing
             pre_ids = lax.dynamic_slice(self.indices, (start,), (length,))
 
-            # Get spikes from connected pre-synaptic neurons
+            # Get spikes from connected pre-synaptic neurons (PCs)
             spikes = bm.take(delayed_spikes, pre_ids)
             active_count = bm.sum(spikes)
-            self.post.I_PC_max.value = self.post.I_PC_max.value.at[i].add(
-                0.01 * bm.minimum(active_count, 1.0)
+            self.post.I_PC.value = self.post.I_PC.value.at[i].add(
+                self.gamma_PC * bm.minimum(active_count, 1.0)
             )
 
 
 class CNToIO(bp.dyn.SynConn):
-    def __init__(self, pre, post, conn, delay=5.0, name=None):
+    def __init__(
+        self, pre, post, conn, delay=5.0, tau_inhib=30.0, gamma_IO_inhib=0.02, name=None
+    ):
         super().__init__(pre=pre, post=post, conn=conn, name=name)
 
+        self.tau_inhib = tau_inhib
+        self.gamma_IO_inhib = gamma_IO_inhib
         self.delay = delay
         (self.indices, self.indptr) = self.conn.require("pre2post")
         self.delay_length = int(delay / bp.share["dt"])  # Convert time delay to steps
@@ -156,19 +154,23 @@ class CNToIO(bp.dyn.SynConn):
             spikes = bm.take(delayed_spikes, pre_ids)
             active_pre = bm.sum(spikes)
             self.I_inhib.value = self.I_inhib.value.at[i].add(
-                0.2 * active_pre / bm.maximum(length, 1)
+                self.gamma_IO_inhib * active_pre / bm.maximum(length, 1)
             )
 
-        self.I_inhib.value = self.I_inhib * 0.95
+        dt = bp.share["dt"]
+        self.I_inhib.value -= (self.I_inhib / self.tau_inhib) * dt
         self.post.input -= self.I_inhib
 
 
 class IOToPC(bp.dyn.SynConn):
-    def __init__(self, pre, post, conn, name=None):
+    def __init__(self, pre, post, conn, cs_weight=0.22, delay=15.0, name=None):
         super().__init__(pre=pre, post=post, conn=conn, name=name)
 
         (self.indices, self.indptr) = self.conn.require("post2pre")
-        self.cs_weight = 0.5
+        self.cs_weight = cs_weight
+        self.delay = delay
+        self.delay_length = int(delay / bp.share["dt"])
+        self.spike_delay = bm.LengthDelay(self.pre.V_axon > 0, self.delay_length)
 
         # Store connectivity information in a more JAX-friendly format
         self.conn_mat = {}
@@ -181,7 +183,8 @@ class IOToPC(bp.dyn.SynConn):
         self.connected_neurons = np.array(self.connected_neurons)
 
     def update(self):
-        io_spikes = self.pre.V_axon > 0
+        self.spike_delay.update(self.pre.V_axon > 0)
+        delayed_spikes = self.spike_delay.retrieve(self.delay_length)
 
         # Process only connected neurons
         for i in self.connected_neurons:
@@ -189,12 +192,11 @@ class IOToPC(bp.dyn.SynConn):
             # Use dynamic_slice instead of standard slicing
             pre_ids = lax.dynamic_slice(self.indices, (start,), (length,))
 
-            # Get spikes from connected pre-synaptic neurons
-            spikes = bm.take(io_spikes, pre_ids)
+            spikes = bm.take(delayed_spikes, pre_ids)
             active_count = bm.sum(spikes)
-            self.post.w.value = self.post.w.value.at[i].add(
-                self.cs_weight * bm.minimum(active_count, 1.0)
-            )
+            # self.post.w.value = self.post.w.value.at[i].add(
+            #     self.cs_weight * bm.minimum(active_count, 1.0)
+            # )
 
 
 class CerebellarNetwork(bp.DynSysGroup):
@@ -234,7 +236,7 @@ class CerebellarNetwork(bp.DynSysGroup):
             "Vr": np.full(num_cn, -65.0),
             "v_init": np.random.normal(-65.0, 3.0, num_cn),
             "w_init": np.zeros(num_cn),
-            "I_intrinsic": np.full(num_cn, 0.35),
+            "I_intrinsic": np.full(num_cn, 1.2),
             "tauI": np.full(num_cn, 30.0),
             "I_PC_max": np.zeros(num_cn),
         }
@@ -245,12 +247,12 @@ class CerebellarNetwork(bp.DynSysGroup):
             "g_int": 0.13,
             "p1": 0.25,
             "p2": 0.15,
-            "g_CaL": 1.1,
+            "g_CaL": 1.4,
             "g_h": 0.12,
             "g_K_Ca": 35.0,
-            "g_ld": 0.01532,
+            "g_ld": 0.016,
             "g_la": 0.016,
-            "g_ls": 0.016,
+            "g_ls": 0.017,
             "g_Na_s": 150.0,
             "g_Kdr_s": 9.0,
             "g_K_s": 5.0,
@@ -280,16 +282,6 @@ class CerebellarNetwork(bp.DynSysGroup):
         self.cn_to_io = CNToIO(pre=self.cn, post=self.io.neurons, conn=cn_to_io_conn)
         self.io_to_pc = IOToPC(pre=self.io.neurons, post=self.pc, conn=io_to_pc_conn)
 
-    # def update(self):
-    #     self.pf()
-    #     self.pf_to_pc()
-    #     self.pc()
-    #     self.pc_to_cn()
-    #     self.cn()
-    #     self.cn_to_io()
-    #     self.io()
-    #     self.io_to_pc()
-
 
 def run_simulation(duration=1000.0, dt=0.1):
     net = CerebellarNetwork()
@@ -298,6 +290,8 @@ def run_simulation(duration=1000.0, dt=0.1):
         "pf.I_OU": net.pf.I_OU,
         "pc.V": net.pc.V,
         "pc.spike": net.pc.spike,
+        "pc.w": net.pc.w,
+        "pc.dbg_delta_w": net.pc.dbg_delta_w,
         "cn.V": net.cn.V,
         "cn.spike": net.cn.spike,
         "cn.I_PC": net.cn.I_PC,

@@ -58,26 +58,29 @@ class DeepCerebellarNuclei(bp.dyn.NeuDyn):
 
         # PC inhibition
         self.I_PC = bm.Variable(bm.zeros(self.num))
-        self.I_PC_max = bm.Variable(bm.asarray(kwargs.get("I_PC_max", 0.0)))
 
         # Spike tracking
         self.spike = bm.Variable(bm.zeros(self.num, dtype=bool))
         self.t_last_spike = bm.Variable(bm.ones(self.num) * -1e7)
 
         # Integration functions
-        self.integral_v = bp.odeint(f=self.dv, method="exp_auto")
+        self.integral_I_PC = bp.odeint(f=self.dI_PC, method="exp_auto")
+        self.integral_V = bp.odeint(f=self.dV, method="exp_auto")
         self.integral_w = bp.odeint(f=self.dw, method="exp_auto")
 
-    def dv(self, V, t, w):
+    def dI_PC(self, I_PC, t):
+        return (-I_PC) / self.tauI
+
+    def dV(self, V, t, w, I_PC):
         """Membrane potential dynamics"""
-        I_total = self.I_intrinsic + self.input.value - self.I_PC
-        dv = (
+        I_total = self.I_intrinsic + self.input.value - I_PC
+        dV = (
             self.gL * (self.EL - V)
             + self.gL * self.DeltaT * bm.exp((V - self.VT) / self.DeltaT)
             + I_total
             - w
         ) / self.C
-        return dv
+        return dV
 
     def dw(self, w, t, V):
         """Adaptation current dynamics"""
@@ -89,8 +92,11 @@ class DeepCerebellarNuclei(bp.dyn.NeuDyn):
         dt = bp.share["dt"]
 
         # Integrate membrane potential and adaptation current
-        V = self.integral_v(self.V, t, self.w, dt=dt)
+        self.I_PC.value = self.integral_I_PC(self.I_PC, t, dt=dt)
+        V = self.integral_V(self.V, t, self.w, self.I_PC, dt=dt)
+        self.V.value = V
         w = self.integral_w(self.w, t, self.V, dt=dt)
+        self.w.value = w
 
         # Spike detection
         spike = V > self.Vcut
@@ -102,20 +108,6 @@ class DeepCerebellarNuclei(bp.dyn.NeuDyn):
         # Reset membrane potential and update adaptation for spiking neurons
         self.V.value = bm.where(spike, self.Vr, V)
         self.w.value = bm.where(spike, w + self.b, w)
-
-    def update_pc_inhibition(self, pc_spikes):
-        """Update PC inhibition based on PC spikes
-
-        Args:
-            pc_spikes: Boolean array indicating PC spikes
-        """
-        # Increase inhibition when PC spikes
-        self.I_PC_max.value = bm.where(pc_spikes, self.I_PC_max + 0.01, self.I_PC_max)
-
-        # Decay inhibition over time
-        self.I_PC.value = (
-            self.I_PC + (self.I_PC_max - self.I_PC) * bp.share["dt"] / self.tauI
-        )
 
 
 if __name__ == "__main__":
