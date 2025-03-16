@@ -9,39 +9,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 
-class OUProcess:
-    def __init__(self, size, I_OU0, tau_OU, sigma_OU):
-        """Initialize Ornstein-Uhlenbeck process.
-
-        Args:
-            size: Number of processes
-            I_OU0: Baseline current (nA)
-            tau_OU: Time constant (ms)
-            sigma_OU: Standard deviation
-        """
-        self.size = size
-        self.I_OU0 = bm.asarray(I_OU0)
-        self.tau_OU = bm.asarray(tau_OU)
-        self.sigma_OU = bm.asarray(sigma_OU)
-
-        self.I_OU = bm.Variable(bm.ones(size) * I_OU0)
-
-    def update(self, dt):
-        """Update the OU process.
-
-        Args:
-            dt: Time step (ms)
-        """
-        xi = bm.random.normal(0, 1, self.size)
-        dI_OU = (
-            (self.I_OU0 - self.I_OU) / self.tau_OU
-            + self.sigma_OU * bm.sqrt(self.tau_OU) * xi
-        ) * dt
-
-        self.I_OU.value = self.I_OU + dI_OU
-        return self.I_OU
-
-
 class PurkinjeCell(bp.dyn.NeuDyn):
     def __init__(self, size, **kwargs):
         """Initialize the Purkinje cell population.
@@ -61,17 +28,6 @@ class PurkinjeCell(bp.dyn.NeuDyn):
                 w_init: Initial adaptation variable
                 I_intrinsic: Intrinsic current (nA)
                 t_ref: Refractory period (ms)
-
-                # PF parameters
-                theta_M0: Moving threshold baseline (60 Hz)
-                tau_M: Threshold time constant (15 ms)
-                A_CSpk: CSpk induced LTD constant (-0.01 nA)
-                tau_CSpk: CSpk induced LTD time constant (350 ms)
-
-                # PF-OU parameters
-                I_OU0_PF: PF baseline current (1.3 nA)
-                tau_OU_PF: PF time constant (50 ms)
-                sigma_OU_PF: PF noise intensity (0.25)
         """
         super().__init__(size=size)
 
@@ -87,18 +43,6 @@ class PurkinjeCell(bp.dyn.NeuDyn):
         self.b = bm.asarray(kwargs.get("b"))  # spike-triggered adaptation
         self.Vr = bm.asarray(kwargs.get("Vr"))  # reset potential
 
-        # PF parameters
-        self.theta_M0 = bm.asarray(
-            kwargs.get("theta_M0", 60.0)
-        )  # Moving threshold baseline
-        self.tau_M = bm.asarray(kwargs.get("tau_M", 15.0))  # Threshold time constant
-        self.A_CSpk = bm.asarray(
-            kwargs.get("A_CSpk", -0.01)
-        )  # CSpk induced LTD constant
-        self.tau_CSpk = bm.asarray(
-            kwargs.get("tau_CSpk", 350.0)
-        )  # CSpk induced LTD time constant
-
         # State variables
         self.V = bm.Variable(bm.asarray(kwargs.get("v_init")))
         self.w = bm.Variable(bm.asarray(kwargs.get("w_init")))
@@ -113,32 +57,9 @@ class PurkinjeCell(bp.dyn.NeuDyn):
         self.integral_v = bp.odeint(f=self.dv, method="exp_auto")
         self.integral_w = bp.odeint(f=self.dw, method="exp_auto")
 
-        # Initialize 5 PF bundles with OU processes
-        self.num_pf = 5
-        self.pf_processes = []
-        for _ in range(self.num_pf):
-            self.pf_processes.append(
-                OUProcess(
-                    size=size,
-                    I_OU0=kwargs.get("I_OU0_PF", 1.3),  # nA
-                    tau_OU=kwargs.get("tau_OU_PF", 50.0),  # ms
-                    sigma_OU=kwargs.get("sigma_OU_PF", 0.25),
-                )
-            )
-
-        # Initialize PF weights from scaled Dirichlet distribution
-        alpha = 2.0  # concentration parameter > 1 favors center of simplex
-        raw_weights = np.random.dirichlet(alpha * np.ones(self.num_pf), size=size)
-        self.pf_weights = bm.Variable(
-            bm.asarray(raw_weights * 5.0)
-        )  # Scale to sum to 5
-
-        # PF synaptic current
-        self.I_PF = bm.Variable(bm.zeros(size))
-
     def dv(self, V, t, w):
         """Membrane potential dynamics"""
-        I_total = self.I_intrinsic + self.input.value + self.I_PF
+        I_total = self.I_intrinsic + self.input.value
         dv = (
             self.gL * (self.EL - V)
             + self.gL * self.DeltaT * bm.exp((V - self.VT) / self.DeltaT)
@@ -156,12 +77,6 @@ class PurkinjeCell(bp.dyn.NeuDyn):
         t = bp.share["t"]
         dt = bp.share["dt"]
 
-        # Update PF OU processes and calculate total PF current
-        I_PF_total = bm.zeros_like(self.I_PF)
-        for i, pf in enumerate(self.pf_processes):
-            I_PF_total += self.pf_weights[:, i] * pf.update(dt)
-        self.I_PF.value = I_PF_total / self.num_pf
-
         # Integrate membrane potential and adaptation current
         V = self.integral_v(self.V, t, self.w, dt=dt)
         w = self.integral_w(self.w, t, self.V, dt=dt)
@@ -176,25 +91,6 @@ class PurkinjeCell(bp.dyn.NeuDyn):
         # Reset membrane potential and update adaptation for spiking neurons
         self.V.value = bm.where(spike, self.Vr, V)
         self.w.value = bm.where(spike, w + self.b, w)
-
-    def update_pf_weights(self, climbing_fiber_spikes):
-        """Update PF weights based on climbing fiber input
-
-        Args:
-            climbing_fiber_spikes: Boolean array indicating climbing fiber spikes
-        """
-        # Update weights based on climbing fiber spikes
-        weight_change = bm.where(
-            climbing_fiber_spikes,
-            self.A_CSpk * bm.exp(-(bp.share["t"] - self.t_last_spike) / self.tau_CSpk),
-            0.0,
-        )
-
-        # Apply weight changes while maintaining sum = 5
-        new_weights = self.pf_weights + weight_change[:, None]
-        new_weights = bm.clip(new_weights, 0.0, None)  # Ensure non-negative
-        weight_sums = bm.sum(new_weights, axis=1, keepdims=True)
-        self.pf_weights.value = 5.0 * new_weights / weight_sums  # Normalize to sum to 5
 
 
 if __name__ == "__main__":
@@ -214,22 +110,13 @@ if __name__ == "__main__":
         "v_init": np.random.normal(-65.0, 3.0, num_cells),  # mV
         "w_init": np.zeros(num_cells),
         "I_intrinsic": np.full(num_cells, 0.35),  # nA
-        # PF parameters
-        "theta_M0": np.full(num_cells, 60.0),  # Hz
-        "tau_M": np.full(num_cells, 15.0),  # ms
-        "A_CSpk": np.full(num_cells, -0.01),
-        "tau_CSpk": np.full(num_cells, 350.0),  # ms
-        # PF-OU parameters
-        "I_OU0_PF": 1.3,  # nA
-        "tau_OU_PF": 50.0,  # ms
-        "sigma_OU_PF": 0.25,
     }
 
     # Create the Purkinje cell group
     PC = PurkinjeCell(num_cells, **params)
 
     # Set up the simulation runner and monitors
-    runner = bp.DSRunner(PC, monitors=["V", "w", "spike", "I_PF", "pf_weights"], dt=0.1)
+    runner = bp.DSRunner(PC, monitors=["V", "w", "spike"], dt=0.1)
 
     print("Running...")
     # Run the simulation for 1000 ms
@@ -241,10 +128,9 @@ if __name__ == "__main__":
     print(f"Max w: {runner.mon.w.max()}")
     print(f"Min w: {runner.mon.w.min()}")
     print(f"Num spikes: {runner.mon.spike.sum()}")
-    print(f"Mean PF current: {runner.mon.I_PF.mean()}")
 
     # Create a figure with subplots
-    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 10))
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(15, 10))
 
     # Plot membrane potentials
     bp.visualize.line_plot(
@@ -269,25 +155,6 @@ if __name__ == "__main__":
         ax=ax2,
     )
     ax2.set_title("Spike raster")
-
-    # Plot PF currents
-    bp.visualize.line_plot(
-        runner.mon.ts,
-        runner.mon.I_PF,
-        xlabel="Time (ms)",
-        ylabel="I_PF (nA)",
-        title="Parallel fiber currents",
-        ax=ax3,
-    )
-    ax3.set_title("Parallel fiber currents")
-
-    # Plot final PF weights distribution
-    final_weights = runner.mon.pf_weights[-1]
-    ax4.boxplot(
-        [final_weights[:, i] for i in range(5)], labels=[f"PF {i+1}" for i in range(5)]
-    )
-    ax4.set_ylabel("Weight")
-    ax4.set_title("Final PF weights distribution")
 
     plt.tight_layout()
     plt.show()

@@ -1,0 +1,43 @@
+flowchart TD
+    %% Input sources
+    PF[/"5 PF Bundles
+    (Ornstein-Uhlenbeck Process)"/]
+    
+    %% Main neural populations
+    PC["100 Purkinje Cells (PC)
+    AdEx Model
+    Upbound (~60 Hz) or Downbound (~90 Hz)"]
+    CN["40 Cerebellar Nuclei (CN)
+    AdEx Model"]
+    IO["40 Inferior Olive (IO) Neurons
+    3-compartment Model
+    With Subthreshold Oscillations (STOs)"]
+    
+    %% Synaptic connections
+    PF -- "Excitatory
+    with Plasticity (BCM & LTD)
+    5 bundles per PC" --> PC
+    
+    PC -- "Inhibitory
+    Each PC to 16 CN
+    Each CN receives ~40 PCs" --> CN
+    
+    CN -- "Inhibitory
+    Each CN to 10 IO
+    Each IO receives ~10 CN" --> IO
+    
+    IO -- "Excitatory (Complex Spikes)
+    Half of IOs project to PCs
+    Each projecting IO to ~5 PCs
+    Each PC receives from 1 IO" --> PC
+    
+    %% IO gap junctions
+    IO -- "Gap Junctions
+    (Electrical Coupling)" --- IO
+    
+    %% Plasticity mechanisms
+    Plasticity["Plasticity Mechanisms:
+    1. BCM (Homeostatic)
+    2. CSpk-triggered LTD"]
+    
+    Plasticity -.- PF

@@ -124,6 +124,8 @@ class IONeuron(bp.dyn.NeuDyn):
         self.soma_n = bm.Variable(bm.ones(size) * 0.2369847)
         self.soma_x = bm.Variable(bm.ones(size) * 0.1)
 
+        self.input = bm.Variable(bm.zeros(size))
+
         self.V_axon = bm.Variable(bm.random.normal(-60, 3, size))
         self.axon_Sodium_h = bm.Variable(bm.ones(size) * 0.9)
         self.axon_Potassium_x = bm.Variable(bm.ones(size) * 0.2369847)
@@ -156,7 +158,6 @@ class IONeuron(bp.dyn.NeuDyn):
             f=self.ddend_Hcurrent_q, method=method
         )
 
-    # Individual derivative functions for each state variable
     def dV_soma(
         self, V_soma, t, V_dend, V_axon, soma_k, soma_l, soma_h, soma_n, soma_x
     ):
@@ -175,7 +176,9 @@ class IONeuron(bp.dyn.NeuDyn):
         soma_Ical = self.g_CaL * soma_k**3 * soma_l * (V_soma - self.V_Ca)
 
         soma_I_Channels = soma_Ik + soma_Ikdr + soma_Ina + soma_Ical
-        return self.S * (-(soma_I_leak + soma_I_interact + soma_I_Channels))
+        return self.S * (
+            -(soma_I_leak + soma_I_interact + soma_I_Channels + self.input.value)
+        )
 
     def dsoma_k(self, soma_k, t, V_soma):
         soma_k_inf = 1 / (1 + bm.exp(-(V_soma + 61) / 4.2))
