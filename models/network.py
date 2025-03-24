@@ -194,9 +194,9 @@ class IOToPC(bp.dyn.SynConn):
 
             spikes = bm.take(delayed_spikes, pre_ids)
             active_count = bm.sum(spikes)
-            # self.post.w.value = self.post.w.value.at[i].add(
-            #     self.cs_weight * bm.minimum(active_count, 1.0)
-            # )
+            self.post.w.value = self.post.w.value.at[i].add(
+                self.cs_weight * bm.minimum(active_count, 1.0)
+            )
 
 
 class CerebellarNetwork(bp.DynSysGroup):
@@ -219,7 +219,7 @@ class CerebellarNetwork(bp.DynSysGroup):
             "Vr": np.full(num_pc, -70.6),
             "v_init": np.random.normal(-65.0, 3.0, num_pc),
             "w_init": np.zeros(num_pc),
-            "I_intrinsic": np.full(num_pc, 0.7),
+            "I_intrinsic": np.full(num_pc, 0.35),
         }
         self.pc = PurkinjeCell(num_pc, **pc_params)
 
