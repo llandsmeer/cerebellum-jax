@@ -332,7 +332,7 @@ class IONeuron(bp.dyn.NeuDyn):
         """
         t = bp.share["t"]
         dt = bp.share["dt"]
-        I_app = 0.0 if x is None else x
+        I_app = 0.0  # if x is None else x
 
         # Get gap junction currents if network is set up
         I_gj = bm.zeros(self.num)
@@ -630,7 +630,11 @@ def make_initial_io_state(
     state["V_dend"] = (
         bm.random.normal(-60, 3, ncells) if V_dend is None else V_dend * bm.ones(ncells)
     )
-    state["dend_Ca2Plus"] = dend_Ca2Plus * bm.ones(ncells)
+    state["dend_Ca2Plus"] = (
+        bm.random.normal(3.715, 0.2, ncells)
+        if dend_Ca2Plus is None
+        else dend_Ca2Plus * bm.ones(ncells)
+    )
     state["dend_Calcium_r"] = (
         bm.random.random(ncells)
         if dend_Calcium_r is None

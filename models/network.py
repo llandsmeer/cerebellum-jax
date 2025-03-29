@@ -163,14 +163,19 @@ class CNToIO(bp.dyn.SynConn):
 
 
 class IOToPC(bp.dyn.SynConn):
-    def __init__(self, pre, post, conn, cs_weight=0.22, delay=15.0, name=None):
+    def __init__(
+        self, pre, post, conn, cs_weight=0.22, delay=15.0, io_threshold=-30.0, name=None
+    ):
         super().__init__(pre=pre, post=post, conn=conn, name=name)
 
         (self.indices, self.indptr) = self.conn.require("post2pre")
         self.cs_weight = cs_weight
+        self.io_threshold = io_threshold
         self.delay = delay
         self.delay_length = int(delay / bp.share["dt"])
-        self.spike_delay = bm.LengthDelay(self.pre.V_axon > 0, self.delay_length)
+        self.spike_delay = bm.LengthDelay(
+            self.pre.V_soma > self.io_threshold, self.delay_length
+        )
 
         # Store connectivity information in a more JAX-friendly format
         self.conn_mat = {}
@@ -183,7 +188,7 @@ class IOToPC(bp.dyn.SynConn):
         self.connected_neurons = np.array(self.connected_neurons)
 
     def update(self):
-        self.spike_delay.update(self.pre.V_axon > 0)
+        self.spike_delay.update(self.pre.V_soma > self.io_threshold)
         delayed_spikes = self.spike_delay.retrieve(self.delay_length)
 
         # Process only connected neurons
@@ -195,7 +200,7 @@ class IOToPC(bp.dyn.SynConn):
             spikes = bm.take(delayed_spikes, pre_ids)
             active_count = bm.sum(spikes)
             self.post.w.value = self.post.w.value.at[i].add(
-                self.cs_weight * bm.minimum(active_count, 1.0)
+                self.cs_weight * active_count
             )
 
 
@@ -208,58 +213,68 @@ class CerebellarNetwork(bp.DynSysGroup):
 
         # Create PC population
         pc_params = {
-            "C": np.full(num_pc, 75.0),
-            "gL": np.full(num_pc, 30.0) * 0.001,  # nS to microS
-            "EL": np.full(num_pc, -70.6),
-            "VT": np.full(num_pc, -50.4),
-            "DeltaT": np.full(num_pc, 2.0),
-            "tauw": np.full(num_pc, 144.0),
-            "a": np.full(num_pc, 4.0) * 0.001,  # nS to microS
-            "b": np.full(num_pc, 0.0805),
-            "Vr": np.full(num_pc, -70.6),
-            "v_init": np.random.normal(-65.0, 3.0, num_pc),
-            "w_init": np.zeros(num_pc),
-            "I_intrinsic": np.full(num_pc, 0.35),
+            "C": bm.random.normal(75.0, 1.0, num_pc),  # pF
+            "gL": bm.random.normal(30.0, 1.0, num_pc) * 0.001,  # nS to microS
+            "EL": bm.random.normal(-70.6, 0.5, num_pc),  # mV
+            "VT": bm.random.normal(-50.4, 0.5, num_pc),  # mV
+            "DeltaT": bm.random.normal(2.0, 0.5, num_pc),  # mV
+            "tauw": bm.random.normal(144.0, 2.0, num_pc),  # ms
+            "a": bm.random.normal(4.0, 0.5, num_pc) * 0.001,  # nS to microS
+            "b": bm.random.normal(0.0805, 0.001, num_pc),  # nA
+            "Vr": bm.random.normal(-70.6, 0.5, num_pc),  # mV
+            "I_intrinsic": bm.random.normal(0.35, 0.21, num_pc),  # nA
+            "v_init": bm.random.normal(-70.6, 0.5, num_pc),  # mV
+            "w_init": bm.zeros(num_pc),
         }
         self.pc = PurkinjeCell(num_pc, **pc_params)
 
         # Create CN population
         cn_params = {
-            "C": np.full(num_cn, 281.0),
-            "gL": np.full(num_cn, 30.0) * 0.001,  # nS to microS
-            "EL": np.full(num_cn, -70.6),
-            "VT": np.full(num_cn, -50.4),
-            "DeltaT": np.full(num_cn, 2.0),
-            "tauw": np.full(num_cn, 30.0),
-            "a": np.full(num_cn, 4.0) * 0.001,  # nS to microS
-            "b": np.full(num_cn, 0.0805),
-            "Vr": np.full(num_cn, -65.0),
-            "v_init": np.random.normal(-65.0, 3.0, num_cn),
-            "w_init": np.zeros(num_cn),
-            "I_intrinsic": np.full(num_cn, 1.2),
-            "tauI": np.full(num_cn, 30.0),
-            "I_PC_max": np.zeros(num_cn),
+            "C": bm.random.normal(281.0, 1.0, num_cn),  # pF
+            "gL": bm.random.normal(30.0, 1.0, num_cn) * 0.001,  # nS to microS
+            "EL": bm.random.normal(-70.6, 0.5, num_cn),  # mV
+            "VT": bm.random.normal(-50.4, 0.5, num_cn),  # mV
+            "DeltaT": bm.random.normal(2.0, 0.5, num_cn),  # mV
+            "tauw": bm.random.normal(30.0, 1.0, num_cn),  # ms
+            "a": bm.random.normal(4.0, 0.5, num_cn) * 0.001,  # nS to microS
+            "b": bm.random.normal(0.0805, 0.001, num_cn),  # nA
+            "Vr": bm.random.normal(-65.0, 0.5, num_cn),  # mV
+            "I_intrinsic": bm.ones(num_cn) * 1.2,  # nA
+            "v_init": bm.random.normal(-65.0, 3.0, num_cn),  # mV
+            "w_init": bm.zeros(num_cn),
+            "tauI": bm.random.normal(30.0, 1.0, num_cn),  # ms
+            "I_PC_max": bm.zeros(num_cn),
         }
         self.cn = DeepCerebellarNuclei(num_cn, **cn_params)
 
         # Create IO population
-        io_params = {
-            "g_int": 0.13,
-            "p1": 0.25,
-            "p2": 0.15,
-            "g_CaL": 1.4,
-            "g_h": 0.12,
-            "g_K_Ca": 35.0,
-            "g_ld": 0.016,
-            "g_la": 0.016,
-            "g_ls": 0.017,
-            "g_Na_s": 150.0,
-            "g_Kdr_s": 9.0,
-            "g_K_s": 5.0,
-            "g_CaH": 4.5,
-            "g_Na_a": 240.0,
-            "g_K_a": 20.0,
-        }
+        io_params = dict(
+            g_Na_s=bm.random.normal(150.0, 1.0, num_io),  # Sodium - (Na v1.6)
+            g_CaL=bm.random.normal(1.4, 0.05, num_io),  # Calcium T - (CaV 3.1)
+            g_Kdr_s=bm.random.normal(9.0, 0.1, num_io),  # Potassium - (K v4.3)
+            g_K_s=bm.random.normal(5.0, 0.1, num_io),  # Potassium - (K v3.4)
+            g_h=bm.random.normal(0.12, 0.01, num_io),  # H current (HCN)
+            g_ls=bm.random.normal(0.017, 0.001, num_io),  # Leak soma
+            g_CaH=bm.random.normal(
+                4.5, 0.1, num_io
+            ),  # High-threshold calcium -- Ca V2.1
+            g_K_Ca=bm.random.normal(35.0, 0.5, num_io),  # Potassium (KCa v1.1 - BK)
+            g_ld=bm.random.normal(0.016, 0.001, num_io),  # Leak dendrite
+            g_Na_a=bm.random.normal(240.0, 1.0, num_io),  # Sodium in axon
+            g_K_a=bm.random.normal(240.0, 0.5, num_io),  # Potassium in axon
+            g_la=bm.random.normal(0.017, 0.001, num_io),  # Leak axon
+            V_Na=bm.random.normal(55.0, 1.0, num_io),  # Sodium reversal potential
+            V_Ca=bm.random.normal(120.0, 1.0, num_io),  # Calcium reversal potential
+            V_K=bm.random.normal(-75.0, 1.0, num_io),  # Potassium reversal potential
+            V_h=bm.random.normal(-43.0, 1.0, num_io),  # H current reversal potential
+            V_l=bm.random.normal(10.0, 1.0, num_io),  # Leak reversal potential
+            S=bm.random.normal(1.0, 0.1, num_io),  # 1/C_m, cm^2/uF
+            g_int=bm.random.normal(0.13, 0.001, num_io),  # Cell internal conductance
+            p1=bm.random.normal(0.25, 0.01, num_io),  # Cell surface ratio soma/dendrite
+            p2=bm.random.normal(
+                0.15, 0.01, num_io
+            ),  # Cell surface ratio axon(hillock)/soma
+        )
         self.io = IONetwork(num_neurons=num_io, g_gj=0.05, nconnections=10, **io_params)
 
         # Define connectivity patterns
