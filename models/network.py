@@ -122,15 +122,13 @@ class CNToIO(bp.dyn.SynConn):
     ):
         super().__init__(pre=pre, post=post, conn=conn, name=name)
 
-        self.tau_inhib = tau_inhib
         self.gamma_IO_inhib = gamma_IO_inhib
         self.delay = delay
         (self.indices, self.indptr) = self.conn.require("pre2post")
-        self.delay_length = int(delay / bp.share["dt"])  # Convert time delay to steps
+        self.delay_length = int(delay / bp.share["dt"])
         self.spike_delay = bm.LengthDelay(pre.spike, self.delay_length)
-        self.I_inhib = bm.Variable(bm.zeros(post.num))
 
-        # Store connectivity information in a more JAX-friendly format
+        # Store connectivity information
         self.conn_mat = {}
         self.connected_neurons = []
         for i in range(post.num):
@@ -139,69 +137,108 @@ class CNToIO(bp.dyn.SynConn):
                 self.conn_mat[i] = (start, end - start)  # (start_idx, length)
                 self.connected_neurons.append(i)
         self.connected_neurons = np.array(self.connected_neurons)
+
+        # Correct way to iterate based on post-synaptic target:
+        (self.post_indices, self.post_indptr) = self.conn.require("pre2post")
+        (self.pre_indices, self.pre_indptr) = self.conn.require("post2pre")
+
+        # Store connectivity for efficient update: target_neuron -> [source_neurons]
+        self.post_to_pre_map = {}
+        for post_idx in range(post.num):
+            start, end = self.pre_indptr[post_idx], self.pre_indptr[post_idx + 1]
+            if end > start:
+                self.post_to_pre_map[post_idx] = self.pre_indices[start:end]
 
     def update(self):
         self.spike_delay.update(self.pre.spike)
         delayed_spikes = self.spike_delay.retrieve(self.delay_length)
 
-        # Process only connected neurons
-        for i in self.connected_neurons:
-            start, length = self.conn_mat[i]
-            # Use dynamic_slice instead of standard slicing
-            pre_ids = lax.dynamic_slice(self.indices, (start,), (length,))
+        # Calculate the total inhibitory current to deliver *this timestep*
+        # Initialize array for dendritic input updates for all postsynaptic neurons
+        post_I_dend_updates = bm.zeros(self.post.num)
 
-            # Get spikes from connected pre-synaptic neurons
+        # Iterate through postsynaptic neurons that have connections
+        for post_idx, pre_ids in self.post_to_pre_map.items():
+            # Get spikes from connected pre-synaptic neurons (CNs)
             spikes = bm.take(delayed_spikes, pre_ids)
             active_pre = bm.sum(spikes)
-            self.I_inhib.value = self.I_inhib.value.at[i].add(
-                self.gamma_IO_inhib * active_pre / bm.maximum(length, 1)
-            )
 
-        dt = bp.share["dt"]
-        self.I_inhib.value -= (self.I_inhib / self.tau_inhib) * dt
-        self.post.input -= self.I_inhib
+            # Calculate inhibitory current for this postsynaptic neuron
+            # Apply total inhibition based on number of spiking inputs
+            inhib_current = self.gamma_IO_inhib * active_pre
+
+            # Add the calculated current for this neuron
+            post_I_dend_updates = post_I_dend_updates.at[post_idx].add(inhib_current)
+
+        # Add the calculated current to the target variable in the postsynaptic neuron
+        # Use += to allow other potential synapses to also target I_dend_syn
+        self.post.I_dend_syn.value += post_I_dend_updates
 
 
 class IOToPC(bp.dyn.SynConn):
     def __init__(
-        self, pre, post, conn, cs_weight=0.22, delay=15.0, io_threshold=-30.0, name=None
+        self,
+        pre,
+        post,
+        conn=None,  # conn argument is now ignored
+        cs_weight=0.22,  # Use the original parameter for incrementing w
+        delay=15.0,
+        io_threshold=-30.0,
+        name=None,
     ):
-        super().__init__(pre=pre, post=post, conn=conn, name=name)
+        # Pass conn=None to super, as we handle connectivity manually
+        super().__init__(pre=pre, post=post, conn=None, name=name)
 
-        (self.indices, self.indptr) = self.conn.require("post2pre")
+        # Parameters
         self.cs_weight = cs_weight
         self.io_threshold = io_threshold
         self.delay = delay
         self.delay_length = int(delay / bp.share["dt"])
+        # Delay buffer for IO soma potential crossing threshold
         self.spike_delay = bm.LengthDelay(
             self.pre.V_soma > self.io_threshold, self.delay_length
         )
 
-        # Store connectivity information in a more JAX-friendly format
-        self.conn_mat = {}
-        self.connected_neurons = []
-        for i in range(post.num):
-            start, end = self.indptr[i], self.indptr[i + 1]
-            if end > start:
-                self.conn_mat[i] = (start, end - start)  # (start_idx, length)
-                self.connected_neurons.append(i)
-        self.connected_neurons = np.array(self.connected_neurons)
+        # --- Custom Connectivity: One IO per PC ---
+        num_pc = post.num
+        num_io_total = pre.num
+        # Assuming the first half of IO neurons are the projecting ones, as per paper description
+        num_io_projecting = num_io_total // 2
+        if num_io_projecting == 0:
+            raise ValueError("No projecting IO neurons found (num_io // 2 is zero)")
+
+        # Indices of the IO neurons that project (absolute indices in the 'pre' population)
+        projecting_io_indices = bm.arange(num_io_projecting)
+
+        # Assign each PC (index i) to one projecting IO neuron (index j)
+        # Simple mapping using modulo: PC 'i' connects to projecting IO 'i % num_io_projecting'
+        # This ensures each PC connects to exactly one IO from the projecting pool.
+        self.pc_to_io_mapping = bm.mod(bm.arange(num_pc), num_io_projecting)
+        # self.pc_to_io_mapping[pc_idx] gives the index *within the projecting_io_indices array*
+        # To get the absolute index in the 'pre' population, it's simply the value itself,
+        # since projecting_io_indices are 0, 1, 2,... num_io_projecting-1.
+        # --- End Custom Connectivity ---
 
     def update(self):
+        # Update the delay buffer with current IO spike states
         self.spike_delay.update(self.pre.V_soma > self.io_threshold)
-        delayed_spikes = self.spike_delay.retrieve(self.delay_length)
+        # Retrieve the delayed spike states for all IO neurons
+        delayed_io_spikes = self.spike_delay.retrieve(
+            self.delay_length
+        )  # Shape: (num_io_total,)
 
-        # Process only connected neurons
-        for i in self.connected_neurons:
-            start, length = self.conn_mat[i]
-            # Use dynamic_slice instead of standard slicing
-            pre_ids = lax.dynamic_slice(self.indices, (start,), (length,))
+        # Get the spike state of the specific IO neuron connected to each PC
+        # Use the mapping to index into the delayed_io_spikes array
+        # self.pc_to_io_mapping contains the *absolute* index of the source IO for each PC
+        io_source_spikes_for_pc = bm.take(
+            delayed_io_spikes, self.pc_to_io_mapping
+        )  # Shape: (num_pc,)
 
-            spikes = bm.take(delayed_spikes, pre_ids)
-            active_count = bm.sum(spikes)
-            self.post.w.value = self.post.w.value.at[i].add(
-                self.cs_weight * active_count
-            )
+        # Calculate the increment for w: cs_weight if the mapped IO spiked, 0 otherwise
+        w_increment = bm.where(io_source_spikes_for_pc, self.cs_weight, 0.0)
+
+        # Add the increment directly to the postsynaptic PC's w variable
+        self.post.w.value += w_increment
 
 
 class CerebellarNetwork(bp.DynSysGroup):
@@ -295,10 +332,10 @@ class CerebellarNetwork(bp.DynSysGroup):
         self.pf_to_pc = PFtoPC(pre=self.pf, post=self.pc, conn=pf_to_pc_conn)
         self.pc_to_cn = PCToCN(pre=self.pc, post=self.cn, conn=pc_to_cn_conn)
         self.cn_to_io = CNToIO(pre=self.cn, post=self.io.neurons, conn=cn_to_io_conn)
-        self.io_to_pc = IOToPC(pre=self.io.neurons, post=self.pc, conn=io_to_pc_conn)
+        self.io_to_pc = IOToPC(pre=self.io.neurons, post=self.pc)
 
 
-def run_simulation(duration=1000.0, dt=0.1):
+def run_simulation(duration=1000.0, dt=0.025):
     net = CerebellarNetwork()
 
     monitors = {
@@ -318,6 +355,7 @@ def run_simulation(duration=1000.0, dt=0.1):
         "io.V_soma": net.io.neurons.V_soma,
         "io.V_axon": net.io.neurons.V_axon,
         "io.V_dend": net.io.neurons.V_dend,
+        "io.I_dend_syn": net.io.neurons.I_dend_syn,
     }
 
     runner = bp.DSRunner(net, monitors=monitors, dt=dt)
