@@ -82,7 +82,7 @@ class IONeuron(bp.dyn.NeuDyn):
         V_Ca=120.0,  # Calcium reversal potential
         V_h=-43.0,  # H current reversal potential
         V_l=10.0,  # Leak reversal potential
-        method="rk4",
+        method="exp_auto",
         **kwargs,
     ):
         super(IONeuron, self).__init__(size=size, **kwargs)
@@ -126,6 +126,9 @@ class IONeuron(bp.dyn.NeuDyn):
         self.soma_n = bm.Variable(init_state["soma_n"])
         self.soma_x = bm.Variable(init_state["soma_x"])
 
+        # For debugging
+        self.dbg_I_as = bm.Variable(bm.zeros(size))
+
         self.input = bm.Variable(bm.zeros(size))
 
         self.V_axon = bm.Variable(init_state["V_axon"])
@@ -166,6 +169,7 @@ class IONeuron(bp.dyn.NeuDyn):
         soma_I_leak = self.g_ls * (V_soma - self.V_l)
         I_ds = (self.g_int / self.p1) * (V_soma - V_dend)
         I_as = (self.g_int / (1 - self.p2)) * (V_soma - V_axon)
+        self.dbg_I_as = I_as
         soma_I_interact = I_ds + I_as
 
         soma_m_inf = 1 / (1 + bm.exp(-(V_soma + 30) / 5.5))
@@ -305,7 +309,7 @@ class IONeuron(bp.dyn.NeuDyn):
             Gap junction currents for each cell
         """
         vdiff = bm.subtract(bm.take(V_dend, gj_src), bm.take(V_dend, gj_tgt))
-        cx36_current_per_gj = (0.2 + 0.8 * bm.exp(-vdiff * vdiff / 100)) * vdiff * g_gj
+        cx36_current_per_gj = (0.4 + 0.6 * bm.exp(-vdiff * vdiff / 2500)) * vdiff * g_gj
 
         I_gj = bm.zeros_like(V_dend)
         for i in range(len(gj_tgt)):
@@ -420,7 +424,14 @@ class IONeuron(bp.dyn.NeuDyn):
         self.dend_Potassium_s.value = new_dend_Potassium_s
         self.dend_Hcurrent_q.value = new_dend_Hcurrent_q
 
-        # Return membrane potentials as output
+        # Add Voltage Clamping
+        V_min = -100.0
+        V_max = 60.0  # Prevent excessive positive values causing instability
+        self.V_soma.value = bm.clip(self.V_soma.value, V_min, V_max)
+        self.V_axon.value = bm.clip(self.V_axon.value, V_min, V_max)
+        self.V_dend.value = bm.clip(self.V_dend.value, V_min, V_max)
+        # End Clamping
+
         return self.V_soma, self.V_axon, self.V_dend
 
 
