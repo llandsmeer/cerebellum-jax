@@ -56,6 +56,12 @@ class IONeuron(bp.dyn.NeuDyn):
         H current reversal potential
     V_l : float
         Leak reversal potential
+    I_OU0 : float, array
+        Baseline/Mean current for the somatic OU process (nA).
+    tau_OU : float, array
+        Time constant for the somatic OU process (ms).
+    sigma_OU : float, array
+        Standard deviation (noise strength) for the somatic OU process.
     """
 
     def __init__(
@@ -82,6 +88,9 @@ class IONeuron(bp.dyn.NeuDyn):
         V_Ca=120.0,  # Calcium reversal potential
         V_h=-43.0,  # H current reversal potential
         V_l=10.0,  # Leak reversal potential
+        I_OU0=-0.3,  # nA ? Paper uses I(IO)_OU0
+        tau_OU=50.0,  # ms ? Paper uses τ(IO)_OU
+        sigma_OU=0.3,  # nA/? Paper uses σ(IO)_OU
         method="rk4",
         **kwargs,
     ):
@@ -115,6 +124,10 @@ class IONeuron(bp.dyn.NeuDyn):
         self.V_Ca = V_Ca
         self.V_h = V_h
         self.V_l = V_l
+
+        self.I_OU0 = bm.asarray(I_OU0)
+        self.tau_OU = bm.asarray(tau_OU)
+        self.sigma_OU = bm.asarray(sigma_OU)
 
         init_state = make_initial_io_state(size)
 
@@ -160,8 +173,21 @@ class IONeuron(bp.dyn.NeuDyn):
             f=self.ddend_Hcurrent_q, method=method
         )
 
+        self.I_OU = bm.Variable(bm.ones(size) * self.I_OU0)  # Start at baseline
+
     def dV_soma(
-        self, V_soma, t, V_dend, V_axon, soma_k, soma_l, soma_h, soma_n, soma_x
+        self,
+        V_soma,
+        t,
+        V_dend,
+        V_axon,
+        soma_k,
+        soma_l,
+        soma_h,
+        soma_n,
+        soma_x,
+        I_OU,
+        I_syn_soma,
     ):
         soma_I_leak = self.g_ls * (V_soma - self.V_l)
         I_ds = (self.g_int / self.p1) * (V_soma - V_dend)
@@ -179,7 +205,7 @@ class IONeuron(bp.dyn.NeuDyn):
 
         soma_I_Channels = soma_Ik + soma_Ikdr + soma_Ina + soma_Ical
         return self.S * (
-            -(soma_I_leak + soma_I_interact + soma_I_Channels + self.input.value)
+            -(soma_I_leak + soma_I_interact + soma_I_Channels) + I_OU + I_syn_soma
         )
 
     def dsoma_k(self, soma_k, t, V_soma):
@@ -334,72 +360,94 @@ class IONeuron(bp.dyn.NeuDyn):
         dt = bp.share["dt"]
         I_app = 0.0  # if x is None else x
 
-        # Get gap junction currents if network is set up
+        # --- 1. Update OU Process State ---
+        xi = bm.random.normal(0, 1, self.size)
+        # Using the formula: dI = (I0 - I)/tau * dt + sigma * sqrt(2/tau) * dW
+        # where dW = xi * sqrt(dt)
+        noise_term = self.sigma_OU * bm.sqrt(2.0 / self.tau_OU) * xi * bm.sqrt(dt)
+        drift_term = (self.I_OU0 - self.I_OU) / self.tau_OU * dt
+        current_I_OU = self.I_OU + drift_term + noise_term  # Calculate next value
+
+        # --- 2. Compute Gap Junction Currents ---
         I_gj = bm.zeros(self.num)
         if hasattr(self, "gj_src") and hasattr(self, "gj_tgt"):
             I_gj = self.compute_gj_currents(
                 self.V_dend, self.gj_src, self.gj_tgt, self.g_gj
             )
 
-        # Update each state variable separately using its own integrator
+        # --- 3. Update Neuron States using Integrators ---
+        # Get current values of state variables needed for derivatives
+        V_soma = self.V_soma.value
+        V_dend = self.V_dend.value
+        V_axon = self.V_axon.value
+        soma_k = self.soma_k.value
+        soma_l = self.soma_l.value
+        soma_h = self.soma_h.value
+        soma_n = self.soma_n.value
+        soma_x = self.soma_x.value
+        axon_Sodium_h = self.axon_Sodium_h.value
+        axon_Potassium_x = self.axon_Potassium_x.value
+        dend_Calcium_r = self.dend_Calcium_r.value
+        dend_Potassium_s = self.dend_Potassium_s.value
+        dend_Hcurrent_q = self.dend_Hcurrent_q.value
+        dend_Ca2Plus = self.dend_Ca2Plus.value
+        I_syn_soma = self.input.value  # Get current synaptic input
+
+        # Update soma voltage, passing the *updated* I_OU and current I_syn_soma
         new_V_soma = self.integral_V_soma(
-            self.V_soma,
+            V_soma,
             t,
-            self.V_dend,
-            self.V_axon,
-            self.soma_k,
-            self.soma_l,
-            self.soma_h,
-            self.soma_n,
-            self.soma_x,
+            V_dend,
+            V_axon,
+            soma_k,
+            soma_l,
+            soma_h,
+            soma_n,
+            soma_x,
+            current_I_OU,  # Pass the calculated next I_OU value
+            I_syn_soma,  # Pass the current synaptic input
             dt=dt,
         )
-        new_soma_k = self.integral_soma_k(self.soma_k, t, self.V_soma, dt=dt)
-        new_soma_l = self.integral_soma_l(self.soma_l, t, self.V_soma, dt=dt)
-        new_soma_h = self.integral_soma_h(self.soma_h, t, self.V_soma, dt=dt)
-        new_soma_n = self.integral_soma_n(self.soma_n, t, self.V_soma, dt=dt)
-        new_soma_x = self.integral_soma_x(self.soma_x, t, self.V_soma, dt=dt)
+        new_soma_k = self.integral_soma_k(soma_k, t, V_soma, dt=dt)
+        new_soma_l = self.integral_soma_l(soma_l, t, V_soma, dt=dt)
+        new_soma_h = self.integral_soma_h(soma_h, t, V_soma, dt=dt)
+        new_soma_n = self.integral_soma_n(soma_n, t, V_soma, dt=dt)
+        new_soma_x = self.integral_soma_x(soma_x, t, V_soma, dt=dt)
 
         new_V_axon = self.integral_V_axon(
-            self.V_axon,
-            t,
-            self.V_soma,
-            self.axon_Sodium_h,
-            self.axon_Potassium_x,
-            dt=dt,
+            V_axon, t, V_soma, axon_Sodium_h, axon_Potassium_x, dt=dt
         )
-        new_axon_Sodium_h = self.integral_axon_Sodium_h(
-            self.axon_Sodium_h, t, self.V_axon, dt=dt
-        )
+        new_axon_Sodium_h = self.integral_axon_Sodium_h(axon_Sodium_h, t, V_axon, dt=dt)
         new_axon_Potassium_x = self.integral_axon_Potassium_x(
-            self.axon_Potassium_x, t, self.V_axon, dt=dt
+            axon_Potassium_x, t, V_axon, dt=dt
         )
 
         new_V_dend = self.integral_V_dend(
-            self.V_dend,
+            V_dend,
             t,
-            self.V_soma,
-            self.dend_Calcium_r,
-            self.dend_Potassium_s,
-            self.dend_Hcurrent_q,
-            I_app,
+            V_soma,
+            dend_Calcium_r,
+            dend_Potassium_s,
+            dend_Hcurrent_q,
+            0.0,  # I_app is zero for now
             I_gj,
             dt=dt,
         )
         new_dend_Ca2Plus = self.integral_dend_Ca2Plus(
-            self.dend_Ca2Plus, t, self.V_dend, self.dend_Calcium_r, dt=dt
+            dend_Ca2Plus, t, V_dend, dend_Calcium_r, dt=dt
         )
         new_dend_Calcium_r = self.integral_dend_Calcium_r(
-            self.dend_Calcium_r, t, self.V_dend, dt=dt
+            dend_Calcium_r, t, V_dend, dt=dt
         )
         new_dend_Potassium_s = self.integral_dend_Potassium_s(
-            self.dend_Potassium_s, t, self.V_dend, self.dend_Ca2Plus, dt=dt
+            dend_Potassium_s, t, V_dend, dend_Ca2Plus, dt=dt
         )
         new_dend_Hcurrent_q = self.integral_dend_Hcurrent_q(
-            self.dend_Hcurrent_q, t, self.V_dend, dt=dt
+            dend_Hcurrent_q, t, V_dend, dt=dt
         )
 
-        # Update state variables
+        # --- 4. Assign Updated Values ---
+        self.I_OU.value = current_I_OU  # Assign the updated OU value
         self.V_soma.value = new_V_soma
         self.soma_k.value = new_soma_k
         self.soma_l.value = new_soma_l
@@ -416,9 +464,6 @@ class IONeuron(bp.dyn.NeuDyn):
         self.dend_Calcium_r.value = new_dend_Calcium_r
         self.dend_Potassium_s.value = new_dend_Potassium_s
         self.dend_Hcurrent_q.value = new_dend_Hcurrent_q
-
-        # Return membrane potentials as output
-        return self.V_soma, self.V_axon, self.V_dend
 
 
 class IONetwork(bp.DynSysGroup):

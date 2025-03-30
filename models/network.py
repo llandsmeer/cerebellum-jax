@@ -6,7 +6,6 @@ import jax.lax as lax
 from models.cells.pc import PurkinjeCell
 from models.cells.dcn import DeepCerebellarNuclei
 from models.cells.io import IONetwork
-from models.cells.ou_process import OUProcess
 
 # Import the new connectivity functions
 from utils.connectivity import (
@@ -320,13 +319,6 @@ class CerebellarNetwork(bp.DynSysGroup):
         )
         self.io = IONetwork(num_neurons=num_io, g_gj=0.05, nconnections=10, **io_params)
 
-        io_ou_params = {
-            "I_OU0": bm.asarray(kwargs.get("IO_I_OU0", -0.3)),
-            "tau_OU": bm.asarray(kwargs.get("IO_tau_OU", 50.0)),
-            "sigma_OU": bm.asarray(kwargs.get("IO_sigma_OU", 0.3)),
-        }
-        self.io_ou = OUProcess(size=num_io, **io_ou_params)
-
         # Update PF Bundle parameters using Table 1 values if provided, else defaults
         pf_params = {
             "PF_I_OU0": kwargs.get("PF_I_OU0", 1.3),
@@ -335,7 +327,7 @@ class CerebellarNetwork(bp.DynSysGroup):
         }
         self.pf = PFBundles(num_bundles=num_pf_bundles, **pf_params)
 
-        # Create PC population
+        # --- PC Population Setup ---
         pc_params = {
             "C": bm.random.normal(75.0, 1.0, num_pc),  # pF
             "gL": bm.random.normal(30.0, 1.0, num_pc) * 0.001,  # nS to microS
@@ -352,7 +344,7 @@ class CerebellarNetwork(bp.DynSysGroup):
         }
         self.pc = PurkinjeCell(num_pc, **pc_params)
 
-        # Create CN population
+        # --- CN Population Setup ---
         cn_params = {
             "C": bm.random.normal(281.0, 1.0, num_cn),  # pF
             "gL": bm.random.normal(30.0, 1.0, num_cn) * 0.001,  # nS to microS
@@ -410,7 +402,6 @@ class CerebellarNetwork(bp.DynSysGroup):
 
 def run_simulation(net, duration=1000.0, dt=0.025):
     # --- Monitors Configuration ---
-    # Basic monitors
     monitors = {
         "pf.I_OU": net.pf.I_OU,
         "pc.V": net.pc.V,
@@ -424,7 +415,7 @@ def run_simulation(net, duration=1000.0, dt=0.025):
         "io.V_axon": net.io.neurons.V_axon,
         "io.V_dend": net.io.neurons.V_dend,
         "io.input": net.io.neurons.input,
-        "io.I_OU": net.io_ou.I_OU,
+        "io.I_OU": net.io.neurons.I_OU,
     }
     if hasattr(net, "io_to_pc") and net.io_to_pc is not None:
         monitors["io_to_pc.w_increment"] = net.io_to_pc.last_w_increment

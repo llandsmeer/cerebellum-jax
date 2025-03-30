@@ -1,4 +1,5 @@
 import brainpy.math as bm
+import brainpy as bp
 
 
 class OUProcess:
@@ -19,20 +20,18 @@ class OUProcess:
         # State variable
         self.I_OU = bm.Variable(bm.ones(size) * I_OU0)
 
-    def update(self, dt):
-        """Update the OU process.
+    def update(self):
+        """Update the OU process."""
+        dt = bp.share["dt"]
 
-        Args:
-            dt: Time step (ms)
-        """
         # Generate Gaussian noise
         xi = bm.random.normal(0, 1, self.size)
 
         # Update OU process using Euler-Maruyama method
-        dI_OU = (
-            (self.I_OU0 - self.I_OU) / self.tau_OU
-            + self.sigma_OU * bm.sqrt(2.0 / self.tau_OU) * xi
-        ) * dt
+        # Using the formula: dI = (I0 - I)/tau * dt + sigma * sqrt(2/tau) * dW
+        # where dW = xi * sqrt(dt)
+        noise_term = self.sigma_OU * bm.sqrt(2.0 / self.tau_OU) * xi * bm.sqrt(dt)
+        drift_term = (self.I_OU0 - self.I_OU) / self.tau_OU * dt
 
-        self.I_OU.value = self.I_OU + dI_OU
+        self.I_OU.value = self.I_OU + drift_term + noise_term
         return self.I_OU
