@@ -145,13 +145,13 @@ class CNToIO(bp.dyn.SynConn):
         conn: bp.conn.IJConn,
         delay=5.0,
         tau_inhib=30.0,
-        gamma_IO_inhib=0.02,
+        gamma_CN_IO=-0.02,
         name=None,
     ):
         super().__init__(pre=pre, post=post, conn=conn, name=name)
 
         self.tau_inhib = tau_inhib
-        self.gamma_IO_inhib = gamma_IO_inhib
+        self.gamma_CN_IO = gamma_CN_IO
         self.delay = delay
         # indices, indptr for pre->post mapping
         (self.post_indices, self.post_indptr) = self.conn.require("pre2post")
@@ -159,22 +159,20 @@ class CNToIO(bp.dyn.SynConn):
         # self.post_indptr shape: (num_pre + 1,)
         self.delay_length = int(delay / bp.share["dt"])
         self.spike_delay = bm.LengthDelay(pre.spike, self.delay_length)
-        self.I_inhib = bm.Variable(
-            bm.zeros(post.num)
-        )  # Stores I(IO)_CN, shape: (num_post,) or (num_io,)
+        self.I_cn = bm.Variable(bm.zeros(post.num))
 
         # Calculate N_CN (number of CN inputs) for each IO cell
         (_, post_indptr_for_norm) = self.conn.require("post2pre")
         n_cn_per_io_np = np.diff(np.asarray(post_indptr_for_norm))
-        if len(n_cn_per_io_np) != post.num:
+
+        if len(n_cn_per_io_np) < post.num:
             temp_n_cn = np.zeros(post.num, dtype=int)
-            if len(n_cn_per_io_np) == post.num:
-                temp_n_cn = n_cn_per_io_np
-            self.n_cn_per_io = bm.asarray(temp_n_cn)  # shape: (num_io,) e.g., (64,)
+            temp_n_cn[: len(n_cn_per_io_np)] = n_cn_per_io_np
+            self.n_cn_per_io = bm.asarray(temp_n_cn)
         else:
             self.n_cn_per_io = bm.asarray(
-                n_cn_per_io_np
-            )  # shape: (num_io,) e.g., (64,)
+                n_cn_per_io_np[: post.num]
+            )  # Ensure it doesn't exceed post.num
 
         # Precompute mapping from connection index to source presynaptic index
         self.num_connections = len(self.post_indices)
@@ -189,39 +187,52 @@ class CNToIO(bp.dyn.SynConn):
 
         # Precompute N_CN for the target IO of each connection
         post_indices_np = np.asarray(self.post_indices)
-        self.target_n_cn_per_conn = bm.asarray(
-            self.n_cn_per_io[post_indices_np]
+        # Clamp N_CN to minimum 1 to avoid division by zero
+        self.target_n_cn_per_conn = bm.maximum(
+            self.n_cn_per_io[post_indices_np], 1.0
+        ).astype(
+            bm.float32
         )  # shape: (num_connections,)
 
     def update(self):
+        dt = bp.share["dt"]
+
+        # 1. Apply exponential decay based on Eq. (23)
+        decay_factor = bm.exp(-dt / self.tau_inhib)
+        self.I_cn.value *= decay_factor
+
+        # 2. Process delayed spikes and calculate increments based on Eq. (24)
         self.spike_delay.update(self.pre.spike)
         delayed_spikes = self.spike_delay.retrieve(
             self.delay_length
         )  # shape: (num_pre,) Boolean
 
+        # Check which connections originated from a spiking neuron
         source_spiked_mask = bm.take(
             delayed_spikes, self.source_indices_per_conn
         )  # shape: (num_connections,) Boolean
 
-        potential_increment = self.gamma_IO_inhib / bm.maximum(
-            self.target_n_cn_per_conn.astype(bm.float32), 1.0
-        )  # shape: (num_connections,)
+        # Calculate the increment PER SPIKING CONNECTION (will be negative)
+        potential_increment = (
+            self.gamma_CN_IO / self.target_n_cn_per_conn
+        )  # gamma is negative
         connection_increments = bm.where(
             source_spiked_mask, potential_increment, 0.0
         )  # shape: (num_connections,)
 
-        I_inhib_increase = bm.segment_sum(
+        # Sum increments for each target postsynaptic neuron (IO cell)
+        I_cn_increase = bm.segment_sum(
             connection_increments,
             self.post_indices,  # Target IO indices as Segment IDs
             num_segments=self.post.num,  # Output shape: (num_io,)
         )
 
-        self.I_inhib.value += I_inhib_increase
+        # 3. Add the increments to the current state
+        self.I_cn.value += I_cn_increase
 
-        dt = bp.share["dt"]
-        self.I_inhib.value -= (self.I_inhib / self.tau_inhib) * dt
-
-        self.post.input.value -= self.I_inhib
+        # 4. Assign the total inhibitory current to the postsynaptic input variable
+        #    This OVERWRITES any previous value in post.input from this synapse
+        self.post.input.value = self.I_cn.value
 
 
 class IOToPC(bp.dyn.SynConn):
@@ -390,6 +401,7 @@ class CerebellarNetwork(bp.DynSysGroup):
             post=self.io.neurons,
             conn=cnio_conn,
             tau_inhib=30.0,
+            gamma_CN_IO=-0.02,
         )
 
         self.io_to_pc = IOToPC(
