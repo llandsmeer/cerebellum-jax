@@ -53,7 +53,9 @@ def run_and_plot_cerebellar_network():
     print("Running cerebellar network simulation...")
 
     # Run the simulation for 1000ms
-    runner = run_simulation(duration=2000.0, dt=0.01)
+    dt = 0.025
+    bm.set_dt(dt)
+    runner = run_simulation(duration=4_000.0, dt=dt)
 
     # Create figure for plotting
     fig = plt.figure(figsize=(15, 15))
@@ -63,7 +65,7 @@ def run_and_plot_cerebellar_network():
     ax1 = fig.add_subplot(gs[0, 0])
     bp.visualize.line_plot(
         runner.mon.ts,
-        np.mean(runner.mon["pc.V"], axis=1),  # First 5 PCs
+        np.mean(runner.mon["pc.V"], axis=1),
         xlabel="Time (ms)",
         ylabel="Membrane Potential (mV)",
         title="PC Membrane Potentials",
@@ -85,7 +87,7 @@ def run_and_plot_cerebellar_network():
     ax3 = fig.add_subplot(gs[0, 2])
     bp.visualize.raster_plot(
         runner.mon.ts,
-        runner.mon["io.V_axon"] > 0,
+        runner.mon["io.V_soma"] > -30.0,
         xlabel="Time (ms)",
         ylabel="IO index",
         title="IO Spike Raster",
