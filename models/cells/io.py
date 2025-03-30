@@ -14,142 +14,64 @@ class IONeuron(bp.dyn.NeuDyn):
     ----------
     size : int
         Number of neurons
-    g_int : float
-        Cell internal conductance
-    p1 : float
-        Cell surface ratio soma/dendrite
-    p2 : float
-        Cell surface ratio axon(hillock)/soma
-    g_CaL : float or array
-        Calcium T conductance (CaV 3.1)
-    g_h : float
-        H current (HCN)
-    g_K_Ca : float
-        Potassium (KCa v1.1 - BK)
-    g_ld : float
-        Leak dendrite
-    g_la : float
-        Leak axon
-    g_ls : float
-        Leak soma
-    g_Na_s : float
-        Sodium - (Na v1.6)
-    g_Kdr_s : float
-        Potassium - (K v4.3)
-    g_K_s : float
-        Potassium - (K v3.4)
-    g_CaH : float
-        High-threshold calcium -- Ca V2.1
-    g_Na_a : float
-        Sodium in axon
-    g_K_a : float
-        Potassium in axon
-    S : float
-        1/C_m, cm^2/uF
-    V_Na : float
-        Sodium reversal potential
-    V_K : float
-        Potassium reversal potential
-    V_Ca : float
-        Calcium reversal potential
-    V_h : float
-        H current reversal potential
-    V_l : float
-        Leak reversal potential
-    I_OU0 : float, array
-        Baseline/Mean current for the somatic OU process (nA).
-    tau_OU : float, array
-        Time constant for the somatic OU process (ms).
-    sigma_OU : float, array
-        Standard deviation (noise strength) for the somatic OU process.
+    kwargs : dict
+        Dictionary containing physiological parameters and initial state values:
+        g_int, p1, p2, g_CaL, g_h, g_K_Ca, g_ld, g_la, g_ls, g_Na_s, g_Kdr_s,
+        g_K_s, g_CaH, g_Na_a, g_K_a, S, V_Na, V_K, V_Ca, V_h, V_l,
+        I_OU0, tau_OU, sigma_OU,
+        V_soma_init, soma_k_init, soma_l_init, soma_h_init, soma_n_init, soma_x_init,
+        V_axon_init, axon_Sodium_h_init, axon_Potassium_x_init,
+        V_dend_init, dend_Ca2Plus_init, dend_Calcium_r_init, dend_Potassium_s_init, dend_Hcurrent_q_init
     """
 
-    def __init__(
-        self,
-        size=1,
-        g_int=0.13,  # Cell internal conductance
-        p1=0.25,  # Cell surface ratio soma/dendrite
-        p2=0.15,  # Cell surface ratio axon(hillock)/soma
-        g_CaL=1.1,  # Calcium T - (CaV 3.1)
-        g_h=0.12,  # H current (HCN)
-        g_K_Ca=35.0,  # Potassium (KCa v1.1 - BK)
-        g_ld=0.01532,  # Leak dendrite
-        g_la=0.016,  # Leak axon
-        g_ls=0.016,  # Leak soma
-        g_Na_s=150.0,  # Sodium - (Na v1.6)
-        g_Kdr_s=9.0,  # Potassium - (K v4.3)
-        g_K_s=5.0,  # Potassium - (K v3.4)
-        g_CaH=4.5,  # High-threshold calcium -- Ca V2.1
-        g_Na_a=240.0,  # Sodium in axon
-        g_K_a=240.0,  # Potassium in axon
-        S=1.0,  # 1/C_m, cm^2/uF
-        V_Na=55.0,  # Sodium reversal potential
-        V_K=-75.0,  # Potassium reversal potential
-        V_Ca=120.0,  # Calcium reversal potential
-        V_h=-43.0,  # H current reversal potential
-        V_l=10.0,  # Leak reversal potential
-        I_OU0=-0.3,  # nA ? Paper uses I(IO)_OU0
-        tau_OU=50.0,  # ms ? Paper uses τ(IO)_OU
-        sigma_OU=0.3,  # nA/? Paper uses σ(IO)_OU
-        method="rk4",
-        **kwargs,
-    ):
-        super(IONeuron, self).__init__(size=size, **kwargs)
+    def __init__(self, size=1, method="rk4", **kwargs):
+        super(IONeuron, self).__init__(size=size)
 
         # Store parameters
-        self.g_int = g_int
-        self.p1 = p1
-        self.p2 = p2
+        self.g_int = bm.asarray(kwargs["g_int"])
+        self.p1 = bm.asarray(kwargs["p1"])
+        self.p2 = bm.asarray(kwargs["p2"])
+        self.g_CaL = bm.asarray(kwargs["g_CaL"])
+        self.g_h = bm.asarray(kwargs["g_h"])
+        self.g_K_Ca = bm.asarray(kwargs["g_K_Ca"])
+        self.g_ld = bm.asarray(kwargs["g_ld"])
+        self.g_la = bm.asarray(kwargs["g_la"])
+        self.g_ls = bm.asarray(kwargs["g_ls"])
+        self.g_Na_s = bm.asarray(kwargs["g_Na_s"])
+        self.g_Kdr_s = bm.asarray(kwargs["g_Kdr_s"])
+        self.g_K_s = bm.asarray(kwargs["g_K_s"])
+        self.g_CaH = bm.asarray(kwargs["g_CaH"])
+        self.g_Na_a = bm.asarray(kwargs["g_Na_a"])
+        self.g_K_a = bm.asarray(kwargs["g_K_a"])
+        self.S = bm.asarray(kwargs["S"])
+        self.V_Na = bm.asarray(kwargs["V_Na"])
+        self.V_K = bm.asarray(kwargs["V_K"])
+        self.V_Ca = bm.asarray(kwargs["V_Ca"])
+        self.V_h = bm.asarray(kwargs["V_h"])
+        self.V_l = bm.asarray(kwargs["V_l"])
+        self.I_OU0 = bm.asarray(kwargs["I_OU0"])
+        self.tau_OU = bm.asarray(kwargs["tau_OU"])
+        self.sigma_OU = bm.asarray(kwargs["sigma_OU"])
 
-        # Handle g_CaL which can be a scalar or array
-        if isinstance(g_CaL, (int, float)):
-            self.g_CaL = g_CaL * bm.ones(size)
-        else:
-            self.g_CaL = bm.asarray(g_CaL)
+        # Initialize state variables from kwargs
+        self.V_soma = bm.Variable(bm.asarray(kwargs["V_soma_init"]))
+        self.soma_k = bm.Variable(bm.asarray(kwargs["soma_k_init"]))
+        self.soma_l = bm.Variable(bm.asarray(kwargs["soma_l_init"]))
+        self.soma_h = bm.Variable(bm.asarray(kwargs["soma_h_init"]))
+        self.soma_n = bm.Variable(bm.asarray(kwargs["soma_n_init"]))
+        self.soma_x = bm.Variable(bm.asarray(kwargs["soma_x_init"]))
 
-        self.g_h = g_h
-        self.g_K_Ca = g_K_Ca
-        self.g_ld = g_ld
-        self.g_la = g_la
-        self.g_ls = g_ls
-        self.g_Na_s = g_Na_s
-        self.g_Kdr_s = g_Kdr_s
-        self.g_K_s = g_K_s
-        self.g_CaH = g_CaH
-        self.g_Na_a = g_Na_a
-        self.g_K_a = g_K_a
-        self.S = S
-        self.V_Na = V_Na
-        self.V_K = V_K
-        self.V_Ca = V_Ca
-        self.V_h = V_h
-        self.V_l = V_l
+        self.input = bm.Variable(bm.zeros(size))  # Synaptic input (e.g. from CN)
 
-        self.I_OU0 = bm.asarray(I_OU0)
-        self.tau_OU = bm.asarray(tau_OU)
-        self.sigma_OU = bm.asarray(sigma_OU)
+        self.V_axon = bm.Variable(bm.asarray(kwargs["V_axon_init"]))
+        self.axon_Sodium_h = bm.Variable(bm.asarray(kwargs["axon_Sodium_h_init"]))
+        self.axon_Potassium_x = bm.Variable(bm.asarray(kwargs["axon_Potassium_x_init"]))
 
-        init_state = make_initial_io_state(size)
-
-        # Initialize state variables
-        self.V_soma = bm.Variable(init_state["V_soma"])
-        self.soma_k = bm.Variable(init_state["soma_k"])
-        self.soma_l = bm.Variable(init_state["soma_l"])
-        self.soma_h = bm.Variable(init_state["soma_h"])
-        self.soma_n = bm.Variable(init_state["soma_n"])
-        self.soma_x = bm.Variable(init_state["soma_x"])
-
-        self.input = bm.Variable(bm.zeros(size))
-
-        self.V_axon = bm.Variable(init_state["V_axon"])
-        self.axon_Sodium_h = bm.Variable(init_state["axon_Sodium_h"])
-        self.axon_Potassium_x = bm.Variable(init_state["axon_Potassium_x"])
-
-        self.V_dend = bm.Variable(init_state["V_dend"])
-        self.dend_Ca2Plus = bm.Variable(init_state["dend_Ca2Plus"])
-        self.dend_Calcium_r = bm.Variable(init_state["dend_Calcium_r"])
-        self.dend_Potassium_s = bm.Variable(init_state["dend_Potassium_s"])
-        self.dend_Hcurrent_q = bm.Variable(init_state["dend_Hcurrent_q"])
+        self.V_dend = bm.Variable(bm.asarray(kwargs["V_dend_init"]))
+        self.dend_Ca2Plus = bm.Variable(bm.asarray(kwargs["dend_Ca2Plus_init"]))
+        self.dend_Calcium_r = bm.Variable(bm.asarray(kwargs["dend_Calcium_r_init"]))
+        self.dend_Potassium_s = bm.Variable(bm.asarray(kwargs["dend_Potassium_s_init"]))
+        self.dend_Hcurrent_q = bm.Variable(bm.asarray(kwargs["dend_Hcurrent_q_init"]))
 
         # Initialize ODE integrators - one for each variable
         self.integral_V_soma = bp.odeint(f=self.dV_soma, method=method)
@@ -476,22 +398,22 @@ class IONetwork(bp.DynSysGroup):
     ----------
     num_neurons : int
         Number of neurons in the network
-    g_gj : float, optional
+    g_gj : float
         Gap junction conductance
     conn_prob : callable, optional
         Probability function for connection based on distance
-    rmax : int, optional
+    rmax : int
         Maximum radius for connections in 3D grid
-    nconnections : int, optional
+    nconnections : int
         Number of connections per neuron
-    **neuron_params
+    neuron_params : dict
         Parameters to pass to individual IONeuron instances
     """
 
     def __init__(
         self,
         num_neurons,
-        g_gj=0.05,
+        g_gj,
         conn_prob=None,
         rmax=4,
         nconnections=10,
@@ -522,12 +444,12 @@ class IONetwork(bp.DynSysGroup):
         tdt : tuple, optional
             Current time and time step
         inp : array, optional
-            External input current to each neuron
+            External input current to each neuron (not currently used by IONeuron)
 
         Returns
         -------
-        tuple
-            Membrane potentials of all compartments (soma, axon, dendrite)
+        None
+            The update happens inplace within the neurons object.
         """
         # Update neurons with input
         return self.neurons()
@@ -605,97 +527,3 @@ class IONetwork(bp.DynSysGroup):
         src_idx = bm.array(src_idx, dtype=bm.int32)
         tgt_idx = bm.array(tgt_idx, dtype=bm.int32)
         return src_idx, tgt_idx
-
-
-def make_initial_io_state(
-    ncells,
-    V_soma=-60.0,
-    soma_k=0.7423159,
-    soma_l=0.0321349,
-    soma_h=0.3596066,
-    soma_n=0.2369847,
-    soma_x=0.1,
-    V_axon=-60.0,
-    axon_Sodium_h=0.9,
-    axon_Potassium_x=0.2369847,
-    V_dend=-60.0,
-    dend_Ca2Plus=3.715,
-    dend_Calcium_r=0.0113,
-    dend_Potassium_s=0.0049291,
-    dend_Hcurrent_q=0.0337836,
-):
-    """
-    Create initial state for IO neurons.
-
-    Parameters
-    ----------
-    ncells : int
-        Number of cells
-    V_soma, soma_k, ... : float or array, optional
-        Initial values for state variables
-
-    Returns
-    -------
-    dict
-        Dictionary of initial state values
-    """
-    state = {}
-
-    state["V_soma"] = (
-        bm.random.normal(-60, 3, ncells) if V_soma is None else V_soma * bm.ones(ncells)
-    )
-    state["soma_k"] = (
-        bm.random.random(ncells) if soma_k is None else soma_k * bm.ones(ncells)
-    )
-    state["soma_l"] = (
-        bm.random.random(ncells) if soma_l is None else soma_l * bm.ones(ncells)
-    )
-    state["soma_h"] = (
-        bm.random.random(ncells) if soma_h is None else soma_h * bm.ones(ncells)
-    )
-    state["soma_n"] = (
-        bm.random.random(ncells) if soma_n is None else soma_n * bm.ones(ncells)
-    )
-    state["soma_x"] = (
-        bm.random.random(ncells) if soma_x is None else soma_x * bm.ones(ncells)
-    )
-
-    state["V_axon"] = (
-        bm.random.normal(-60, 3, ncells) if V_axon is None else V_axon * bm.ones(ncells)
-    )
-    state["axon_Sodium_h"] = (
-        bm.random.random(ncells)
-        if axon_Sodium_h is None
-        else axon_Sodium_h * bm.ones(ncells)
-    )
-    state["axon_Potassium_x"] = (
-        bm.random.random(ncells)
-        if axon_Potassium_x is None
-        else axon_Potassium_x * bm.ones(ncells)
-    )
-
-    state["V_dend"] = (
-        bm.random.normal(-60, 3, ncells) if V_dend is None else V_dend * bm.ones(ncells)
-    )
-    state["dend_Ca2Plus"] = (
-        bm.random.normal(3.715, 0.2, ncells)
-        if dend_Ca2Plus is None
-        else dend_Ca2Plus * bm.ones(ncells)
-    )
-    state["dend_Calcium_r"] = (
-        bm.random.random(ncells)
-        if dend_Calcium_r is None
-        else dend_Calcium_r * bm.ones(ncells)
-    )
-    state["dend_Potassium_s"] = (
-        bm.random.random(ncells)
-        if dend_Potassium_s is None
-        else dend_Potassium_s * bm.ones(ncells)
-    )
-    state["dend_Hcurrent_q"] = (
-        bm.random.random(ncells)
-        if dend_Hcurrent_q is None
-        else dend_Hcurrent_q * bm.ones(ncells)
-    )
-
-    return state

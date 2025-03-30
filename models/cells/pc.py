@@ -1,12 +1,5 @@
-import os
-
-# Configure JAX to use CPU
-os.environ["JAX_PLATFORM_NAME"] = "cpu"
-
 import brainpy as bp
 import brainpy.math as bm
-import numpy as np
-import matplotlib.pyplot as plt
 
 
 class PurkinjeCell(bp.dyn.NeuDyn):
@@ -16,12 +9,12 @@ class PurkinjeCell(bp.dyn.NeuDyn):
             size: Number of cells.
             kwargs: Dictionary containing the following parameters:
                 C: Capacitance (pF)
-                gL: Leak conductance (nS)
+                gL: Leak conductance (microS)
                 EL: Resting potential (mV)
                 VT: Threshold potential for exponential term (mV)
                 DeltaT: Slope factor (mV)
                 tauw: Adaptation time constant (ms)
-                a: Subthreshold adaptation (nS)
+                a: Subthreshold adaptation (microS)
                 b: Spike-triggered adaptation increment (nA)
                 Vr: Reset potential (mV)
                 v_init: Initial membrane potential (mV)
@@ -32,22 +25,22 @@ class PurkinjeCell(bp.dyn.NeuDyn):
         super().__init__(size=size)
 
         # Parameters
-        self.C = bm.asarray(kwargs.get("C"))  # capacitance
-        self.gL = bm.asarray(kwargs.get("gL"))  # leak conductance
-        self.EL = bm.asarray(kwargs.get("EL"))  # Leakage reversal potential
-        self.VT = bm.asarray(kwargs.get("VT"))  # threshold potential
-        self.DeltaT = bm.asarray(kwargs.get("DeltaT"))  # slope factor
+        self.C = bm.asarray(kwargs["C"])  # capacitance
+        self.gL = bm.asarray(kwargs["gL"])  # leak conductance
+        self.EL = bm.asarray(kwargs["EL"])  # leak reversal potential
+        self.VT = bm.asarray(kwargs["VT"])  # threshold potential
+        self.DeltaT = bm.asarray(kwargs["DeltaT"])  # slope factor
         self.Vcut = self.VT + 5 * self.DeltaT  # spike cutoff potential
-        self.tauw = bm.asarray(kwargs.get("tauw"))  # adaptation time constant
-        self.a = bm.asarray(kwargs.get("a"))  # subthreshold adaptation
-        self.b = bm.asarray(kwargs.get("b"))  # spike-triggered adaptation
-        self.Vr = bm.asarray(kwargs.get("Vr"))  # reset potential
+        self.tauw = bm.asarray(kwargs["tauw"])  # adaptation time constant
+        self.a = bm.asarray(kwargs["a"])  # subthreshold adaptation
+        self.b = bm.asarray(kwargs["b"])  # spike-triggered adaptation increment
+        self.Vr = bm.asarray(kwargs["Vr"])  # reset potential
 
         # State variables
-        self.V = bm.Variable(bm.asarray(kwargs.get("v_init")))
-        self.w = bm.Variable(bm.asarray(kwargs.get("w_init")))
-        self.input = bm.Variable(bm.zeros(size))
-        self.I_intrinsic = bm.asarray(kwargs.get("I_intrinsic"))
+        self.V = bm.Variable(bm.asarray(kwargs["v_init"]))  # membrane potential
+        self.w = bm.Variable(bm.asarray(kwargs["w_init"]))  # adaptation variable
+        self.I_intrinsic = bm.asarray(kwargs["I_intrinsic"])  # intrinsic current
+        self.input = bm.Variable(bm.zeros(size))  # input current
 
         # Debug variables for membrane potential terms
         self.dbg_leak = bm.Variable(bm.zeros(size))
