@@ -21,10 +21,10 @@ class PFBundles(bp.dyn.NeuDyn):
     def __init__(self, num_bundles=5, **kwargs):
         super().__init__(size=num_bundles)
 
-        # Parameters
-        self.I_OU0 = bm.asarray(kwargs.get("I_OU0", 0.6))
-        self.tau_OU = bm.asarray(kwargs.get("tau_OU", 30.0))
-        self.sigma_OU = bm.asarray(kwargs.get("sigma_OU", 0.1))
+        # Parameters from Table 1 for PF
+        self.I_OU0 = bm.asarray(kwargs.get("PF_I_OU0", 1.3))
+        self.tau_OU = bm.asarray(kwargs.get("PF_tau_OU", 50.0))
+        self.sigma_OU = bm.asarray(kwargs.get("PF_sigma_OU", 0.25))
 
         # State variables
         self.I_OU = bm.Variable(bm.ones(self.num) * self.I_OU0)  # shape: (num_pf,)
@@ -32,12 +32,9 @@ class PFBundles(bp.dyn.NeuDyn):
     def update(self):
         dt = bp.share["dt"]
         xi = bm.random.normal(0, 1, self.num)
-        dI_OU = (
-            (self.I_OU0 - self.I_OU) / self.tau_OU
-            + self.sigma_OU * bm.sqrt(self.tau_OU) * xi
-        ) * dt
-
-        self.I_OU.value = self.I_OU + dI_OU
+        noise_term = self.sigma_OU * bm.sqrt(2.0 / self.tau_OU) * xi * bm.sqrt(dt)
+        drift_term = (self.I_OU0 - self.I_OU) / self.tau_OU * dt
+        self.I_OU.value = self.I_OU + drift_term + noise_term
         return self.I_OU
 
 
@@ -87,7 +84,7 @@ class PFtoPC(bp.dyn.SynConn):
             self.post_indices_flat,  # Segment IDs
             num_segments=self.post.num,
         )  # Output shape: (num_pc,)
-        self.post.input = total_input  # shape: (num_pc,)
+        self.post.input.value = total_input  # shape: (num_pc,)
 
 
 class PCToCN(bp.dyn.SynConn):
@@ -291,7 +288,52 @@ class CerebellarNetwork(bp.DynSysGroup):
     def __init__(self, num_pf_bundles=5, num_pc=100, num_cn=40, num_io=64, **kwargs):
         super(CerebellarNetwork, self).__init__()
 
-        self.pf = PFBundles(num_bundles=num_pf_bundles)
+        # Create IO population
+        io_params = dict(
+            g_Na_s=bm.random.normal(150.0, 1.0, num_io),  # mS/cm2
+            g_CaL=0.5 + 1.2 * bm.random.rand(num_io),  # mS/cm2
+            g_Kdr_s=bm.random.normal(9.0, 0.1, num_io),  # mS/cm2
+            g_K_s=bm.random.normal(5.0, 0.1, num_io),  # mS/cm2
+            g_h=bm.random.normal(0.12, 0.01, num_io),  # mS/cm2
+            g_ls=bm.random.normal(0.017, 0.001, num_io),  # mS/cm2
+            g_CaH=bm.random.normal(4.5, 0.1, num_io),  # mS/cm2
+            g_K_Ca=bm.random.normal(35.0, 0.5, num_io),  # mS/cm2
+            g_ld=bm.random.normal(0.016, 0.001, num_io),  # mS/cm2
+            g_Na_a=bm.random.normal(240.0, 1.0, num_io),  # mS/cm2
+            g_K_a=bm.random.normal(240.0, 0.5, num_io),  # mS/cm2
+            g_la=bm.random.normal(0.017, 0.001, num_io),  # mS/cm2
+            V_Na=bm.random.normal(55.0, 1.0, num_io),  # mV
+            V_Ca=bm.random.normal(120.0, 1.0, num_io),  # mV
+            V_K=bm.random.normal(-75.0, 1.0, num_io),  # mV
+            V_h=bm.random.normal(-43.0, 1.0, num_io),  # mV
+            V_l=bm.random.normal(10.0, 1.0, num_io),  # mV
+            S=bm.random.normal(1.0, 0.1, num_io),  # 1/C_m, cm^2/uF
+            g_int=bm.random.normal(
+                0.13, 0.001, num_io
+            ),  # Cell internal conductance - no unit given
+            p1=bm.random.normal(
+                0.25, 0.01, num_io
+            ),  # Cell surface ratio soma/dendrite - no unit given
+            p2=bm.random.normal(
+                0.15, 0.01, num_io
+            ),  # Cell surface ratio axon(hillock)/soma - no unit given
+        )
+        self.io = IONetwork(num_neurons=num_io, g_gj=0.05, nconnections=10, **io_params)
+
+        io_ou_params = {
+            "I_OU0": bm.asarray(kwargs.get("IO_I_OU0", -0.3)),
+            "tau_OU": bm.asarray(kwargs.get("IO_tau_OU", 50.0)),
+            "sigma_OU": bm.asarray(kwargs.get("IO_sigma_OU", 0.3)),
+        }
+        self.io_ou = OUProcess(size=num_io, **io_ou_params)
+
+        # Update PF Bundle parameters using Table 1 values if provided, else defaults
+        pf_params = {
+            "PF_I_OU0": kwargs.get("PF_I_OU0", 1.3),
+            "PF_tau_OU": kwargs.get("PF_tau_OU", 50.0),
+            "PF_sigma_OU": kwargs.get("PF_sigma_OU", 0.25),
+        }
+        self.pf = PFBundles(num_bundles=num_pf_bundles, **pf_params)
 
         # Create PC population
         pc_params = {
@@ -328,36 +370,6 @@ class CerebellarNetwork(bp.DynSysGroup):
             "I_PC_max": bm.zeros(num_cn),
         }
         self.cn = DeepCerebellarNuclei(num_cn, **cn_params)
-
-        # Create IO population
-        io_params = dict(
-            g_Na_s=bm.random.normal(150.0, 1.0, num_io),  # Sodium - (Na v1.6)
-            g_CaL=bm.random.normal(1.4, 0.05, num_io),  # Calcium T - (CaV 3.1)
-            g_Kdr_s=bm.random.normal(9.0, 0.1, num_io),  # Potassium - (K v4.3)
-            g_K_s=bm.random.normal(5.0, 0.1, num_io),  # Potassium - (K v3.4)
-            g_h=bm.random.normal(0.12, 0.01, num_io),  # H current (HCN)
-            g_ls=bm.random.normal(0.017, 0.001, num_io),  # Leak soma
-            g_CaH=bm.random.normal(
-                4.5, 0.1, num_io
-            ),  # High-threshold calcium -- Ca V2.1
-            g_K_Ca=bm.random.normal(35.0, 0.5, num_io),  # Potassium (KCa v1.1 - BK)
-            g_ld=bm.random.normal(0.016, 0.001, num_io),  # Leak dendrite
-            g_Na_a=bm.random.normal(240.0, 1.0, num_io),  # Sodium in axon
-            g_K_a=bm.random.normal(240.0, 0.5, num_io),  # Potassium in axon
-            g_la=bm.random.normal(0.017, 0.001, num_io),  # Leak axon
-            V_Na=bm.random.normal(55.0, 1.0, num_io),  # Sodium reversal potential
-            V_Ca=bm.random.normal(120.0, 1.0, num_io),  # Calcium reversal potential
-            V_K=bm.random.normal(-75.0, 1.0, num_io),  # Potassium reversal potential
-            V_h=bm.random.normal(-43.0, 1.0, num_io),  # H current reversal potential
-            V_l=bm.random.normal(10.0, 1.0, num_io),  # Leak reversal potential
-            S=bm.random.normal(1.0, 0.1, num_io),  # 1/C_m, cm^2/uF
-            g_int=bm.random.normal(0.13, 0.001, num_io),  # Cell internal conductance
-            p1=bm.random.normal(0.25, 0.01, num_io),  # Cell surface ratio soma/dendrite
-            p2=bm.random.normal(
-                0.15, 0.01, num_io
-            ),  # Cell surface ratio axon(hillock)/soma
-        )
-        self.io = IONetwork(num_neurons=num_io, g_gj=0.05, nconnections=10, **io_params)
 
         # Create connectivity
         pfpc_pre, pfpc_post, pfpc_weights = generate_pf_pc_connectivity(
@@ -396,31 +408,34 @@ class CerebellarNetwork(bp.DynSysGroup):
         )
 
 
-def run_simulation(duration=1000.0, dt=0.025):
-    net = CerebellarNetwork()
-
+def run_simulation(net, duration=1000.0, dt=0.025):
+    # --- Monitors Configuration ---
+    # Basic monitors
     monitors = {
         "pf.I_OU": net.pf.I_OU,
         "pc.V": net.pc.V,
         "pc.spike": net.pc.spike,
         "pc.w": net.pc.w,
-        "pc.dbg_delta_w": net.pc.dbg_delta_w,
         "pc.input": net.pc.input,
-        "pc.dbg_leak": net.pc.dbg_leak,
-        "pc.dbg_exp": net.pc.dbg_exp,
-        "pc.dbg_current": net.pc.dbg_current,
-        "pc.dbg_w": net.pc.dbg_w,
         "cn.V": net.cn.V,
         "cn.spike": net.cn.spike,
         "cn.I_PC": net.cn.I_PC,
         "io.V_soma": net.io.neurons.V_soma,
         "io.V_axon": net.io.neurons.V_axon,
         "io.V_dend": net.io.neurons.V_dend,
-        "io.I_dend_syn": net.io.neurons.I_dend_syn,
+        "io.input": net.io.neurons.input,
+        "io.I_OU": net.io_ou.I_OU,
     }
+    if hasattr(net, "io_to_pc") and net.io_to_pc is not None:
+        monitors["io_to_pc.w_increment"] = net.io_to_pc.last_w_increment
 
+    # Optional: Add detailed IO current monitors if needed for debugging
+    # ... (code to add detailed currents can be uncommented if needed) ...
+
+    # --- Simulation Runner ---
     runner = bp.DSRunner(net, monitors=monitors, dt=dt)
-
+    print(f"Running simulation for {duration}ms with dt={dt}ms...")
     runner.run(duration)
+    print("Simulation finished.")
 
     return runner
