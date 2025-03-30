@@ -524,6 +524,6 @@ class IONetwork(bp.DynSysGroup):
         src_idx = np.concatenate([neuron_id2, neuron_id1])
 
         # Convert to BrainPy indices
-        src_idx = bm.array(src_idx, dtype=bm.int32)
-        tgt_idx = bm.array(tgt_idx, dtype=bm.int32)
+        src_idx = bm.array(src_idx, dtype=bm.uint32)
+        tgt_idx = bm.array(tgt_idx, dtype=bm.uint32)
         return src_idx, tgt_idx

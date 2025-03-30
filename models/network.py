@@ -1,3 +1,4 @@
+import warnings
 import numpy as np
 import brainpy as bp
 import brainpy.math as bm
@@ -101,7 +102,7 @@ class PCToCN(bp.dyn.SynConn):
 
         # Precompute mapping from connection index to source presynaptic index
         self.num_connections = len(self.post_indices)
-        source_indices_per_conn_np = np.zeros(self.num_connections, dtype=np.int32)
+        source_indices_per_conn_np = np.zeros(self.num_connections, dtype=np.uint32)
         post_indptr_np = np.asarray(self.post_indptr)
         for i in range(self.pre.num):
             start, end = post_indptr_np[i], post_indptr_np[i + 1]
@@ -165,7 +166,7 @@ class CNToIO(bp.dyn.SynConn):
 
         # Precompute mapping from connection index to source presynaptic index
         self.num_connections = len(self.post_indices)
-        source_indices_per_conn_np = np.zeros(self.num_connections, dtype=np.int32)
+        source_indices_per_conn_np = np.zeros(self.num_connections, dtype=np.uint32)
         post_indptr_np = np.asarray(self.post_indptr)
         for i in range(self.pre.num):
             start, end = post_indptr_np[i], post_indptr_np[i + 1]
@@ -742,6 +743,8 @@ def run_simulation(duration=1000.0, dt=0.025, net_params=None, seed=42):
     # Create network instance, passing parameters if provided
     if net_params is None:
         net_params = {}
+    # Silence warnings
+    warnings.filterwarnings("ignore", category=FutureWarning)
     net = CerebellarNetwork(**net_params)
 
     # --- Monitors Configuration --- #
