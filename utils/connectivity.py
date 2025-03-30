@@ -49,8 +49,8 @@ def generate_pf_pc_connectivity(
             weights_matrix[pc_idx, pf_idx] = conn_weights[i]
 
     return (
-        np.array(pre_ids, dtype=np.int32),
-        np.array(post_ids, dtype=np.int32),
+        np.array(pre_ids, dtype=np.uint32),
+        np.array(post_ids, dtype=np.uint32),
         bm.asarray(weights_matrix),
     )
 
@@ -87,7 +87,7 @@ def generate_pc_cn_connectivity(num_pc, num_cn, n_cn_per_pc=16):
             pre_ids.append(pc_idx)
             post_ids.append(cn_idx)
 
-    return np.array(pre_ids, dtype=np.int32), np.array(post_ids, dtype=np.int32)
+    return np.array(pre_ids, dtype=np.uint32), np.array(post_ids, dtype=np.uint32)
 
 
 def generate_cn_io_connectivity(num_cn, num_io, n_io_per_cn=10):
@@ -122,7 +122,7 @@ def generate_cn_io_connectivity(num_cn, num_io, n_io_per_cn=10):
             pre_ids.append(cn_idx)
             post_ids.append(io_idx)
 
-    return np.array(pre_ids, dtype=np.int32), np.array(post_ids, dtype=np.int32)
+    return np.array(pre_ids, dtype=np.uint32), np.array(post_ids, dtype=np.uint32)
 
 
 def generate_io_pc_connectivity(num_io, num_pc, n_io_projecting_ratio=0.5):
@@ -158,4 +158,4 @@ def generate_io_pc_connectivity(num_io, num_pc, n_io_projecting_ratio=0.5):
         pre_ids.append(io_idx)
         post_ids.append(pc_idx)
 
-    return np.array(pre_ids, dtype=np.int32), np.array(post_ids, dtype=np.int32)
+    return np.array(pre_ids, dtype=np.uint32), np.array(post_ids, dtype=np.uint32)
