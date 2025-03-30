@@ -48,9 +48,6 @@ def generate_pf_pc_connectivity(
             post_ids.append(pc_idx)
             weights_matrix[pc_idx, pf_idx] = conn_weights[i]
 
-    print(
-        f"PF->PC: Generated {len(pre_ids)} connections. Each PC <- {n_pf_per_pc} PFs."
-    )
     return (
         np.array(pre_ids, dtype=np.int32),
         np.array(post_ids, dtype=np.int32),
@@ -90,9 +87,6 @@ def generate_pc_cn_connectivity(num_pc, num_cn, n_cn_per_pc=16):
             pre_ids.append(pc_idx)
             post_ids.append(cn_idx)
 
-    print(
-        f"PC->CN: Generated {len(pre_ids)} connections. Each PC -> {n_cn_per_pc} CNs."
-    )
     return np.array(pre_ids, dtype=np.int32), np.array(post_ids, dtype=np.int32)
 
 
@@ -128,9 +122,6 @@ def generate_cn_io_connectivity(num_cn, num_io, n_io_per_cn=10):
             pre_ids.append(cn_idx)
             post_ids.append(io_idx)
 
-    print(
-        f"CN->IO: Generated {len(pre_ids)} connections. Each CN -> {n_io_per_cn} IOs."
-    )
     return np.array(pre_ids, dtype=np.int32), np.array(post_ids, dtype=np.int32)
 
 
@@ -167,12 +158,4 @@ def generate_io_pc_connectivity(num_io, num_pc, n_io_projecting_ratio=0.5):
         pre_ids.append(io_idx)
         post_ids.append(pc_idx)
 
-    print(
-        f"IO->PC: Generated {len(pre_ids)} connections. Each PC <- 1 projecting IO ({num_io_projecting} total)."
-    )
     return np.array(pre_ids, dtype=np.int32), np.array(post_ids, dtype=np.int32)
-
-
-# Note: IO-IO Gap Junction connectivity is handled within IONetwork currently.
-# If needed, a function could be added here, but it requires details on
-# how to implement the "connects to all other neurons" rule described.
