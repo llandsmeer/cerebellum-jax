@@ -765,8 +765,6 @@ def run_simulation(duration=1000.0, dt=0.025, net_params=None, seed=42):
     }
 
     runner = bp.DSRunner(net, monitors=monitors, dt=dt)
-    print(f"Running simulation for {duration}ms with dt={dt}ms...")
     runner.run(duration)
-    print("Simulation finished.")
 
     return runner

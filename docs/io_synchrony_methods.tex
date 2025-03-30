@@ -1,0 +1,76 @@
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{geometry}
+\geometry{a4paper, margin=1in}
+
+\title{Methods Supplement: Gap Junction Ablation Experiment}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Gap Junction Ablation Experiment}
+
+To investigate the functional role of electrical coupling within the Inferior Olive (IO) network and its impact on the broader olivocerebellar circuit dynamics, we performed a series of simulations where the conductance of gap junctions between IO neurons was systematically varied.
+
+\subsection{Experimental Design}
+
+The experiment utilized the detailed olivocerebellar network model described previously (Section X.X). The primary parameter manipulated was the gap junction conductance, denoted as \( g_{gj} \). Simulations were conducted under multiple conditions, including the model's default value (e.g., \( g_{gj} = [Default Value] \) mS/cm\(^2\)) and complete ablation of electrical coupling (\( g_{gj} = 0 \) mS/cm\(^2\)). Additional intermediate values were potentially simulated to observe graded effects.
+
+To ensure robustness against stochasticity inherent in the model (e.g., Ornstein-Uhlenbeck noise processes, random initial conditions), each \( g_{gj} \) condition was simulated multiple times (e.g., N=10 runs) using different pseudo-random number generator seeds. Each simulation ran for a duration of [Simulation Duration] ms with a time step of \( \Delta t = \) [Time Step] ms. Key state variables and spike times from all neural populations (PF, PC, CN, IO) were recorded for subsequent analysis.
+
+\subsection{Analysis Metrics}
+
+A suite of quantitative metrics was employed to analyze the simulation results, focusing on IO network dynamics and downstream consequences in PCs and CNs. These metrics are detailed below. Where applicable, results from multiple runs under the same \( g_{gj \) condition were averaged. Pre-analysis checks using the `check_network_stability` function (comparing firing rates and voltage ranges against predefined physiological thresholds) were performed to ensure simulation validity.
+
+\subsubsection{IO Subthreshold Oscillation (STO) Synchrony (Kuramoto Order Parameter)}
+\textit{Motivation:} To directly quantify the degree of phase synchronization of subthreshold membrane potential oscillations within the IO network, which is hypothesized to be strongly dependent on gap junction coupling.
+\textit{Calculation:} The somatic membrane potential traces \( V_k(t) \) for all \( N_{IO} \) IO neurons were first band-pass filtered (Butterworth filter, 4-12 Hz) to isolate the STO frequency band. The instantaneous phase \( \theta_k(t) \) of the filtered signal for each neuron \( k \) was extracted using the Hilbert transform. The Kuramoto Order Parameter \( R(t) \) was then calculated as the magnitude of the mean phase vector:
+\begin{equation}
+R(t) = \left| \frac{1}{N_{IO}} \sum_{k=1}^{N_{IO}} e^{i \theta_k(t)} \right|
+\end{equation}
+The time-averaged value \( \langle R(t) \rangle \) was used as a summary statistic for each simulation run. Higher values (\( \approx 1 \)) indicate stronger phase synchrony, while lower values (\( \approx 0 \)) indicate desynchronization.
+
+\subsubsection{IO STO Synchrony (Voltage Standard Deviation)}
+\textit{Motivation:} To provide a complementary, intuitive measure of IO synchrony based on the similarity of membrane potentials across the population.
+\textit{Calculation:} The standard deviation of the somatic membrane potential \( V_k(t) \) across the IO population was calculated at each time step \( t \):
+\begin{equation}
+\sigma_V(t) = \sqrt{\frac{1}{N_{IO}-1} \sum_{k=1}^{N_{IO}} (V_k(t) - \bar{V}(t))^2}
+\end{equation}
+where \( \bar{V}(t) \) is the mean somatic voltage across the population at time \( t \). The time-averaged value \( \langle \sigma_V(t) \rangle \) was used as a summary statistic. Lower values indicate higher synchrony (less voltage dispersion).
+
+\subsubsection{IO STO Dominant Frequency}
+\textit{Motivation:} To assess whether changes in coupling strength affect the characteristic frequency of IO subthreshold oscillations.
+\textit{Calculation:} The Power Spectral Density (PSD) was estimated for each IO neuron's somatic voltage trace using the Fast Fourier Transform (FFT) after detrending. The PSDs were averaged across the population. The peak frequency \( f_{peak} \) was identified within a physiologically relevant range (e.g., 1-20 Hz) from the average PSD.
+
+\subsubsection{PC Complex Spike (CS) Synchrony}
+\textit{Motivation:} To determine how the synchrony of IO firing (which triggers CSs) propagates to the Purkinje cell layer.
+\textit{Calculation:} Complex spike events were detected for each of the \( N_{PC} \) Purkinje cells (e.g., based on the timing of the `IOtoPC` synaptic input increment). A binary time series \( b_k(t) \) was constructed for each PC \( k \), with \( b_k(t) = 1 \) at the time step of a CS and 0 otherwise. The average pairwise Pearson correlation coefficient \( \bar{\rho}_{CS} \) was calculated between all unique pairs \( (j, k) \) of these binary series:
+\begin{equation}
+\bar{\rho}_{CS} = \frac{2}{N_{PC}(N_{PC}-1)} \sum_{j=1}^{N_{PC}-1} \sum_{k=j+1}^{N_{PC}} \rho(b_j, b_k)
+\end{equation}
+Higher \( \bar{\rho}_{CS} \) indicates more synchronized CS events across the PC population.
+
+\subsubsection{CN Firing Burstiness (CV of ISI)}
+\textit{Motivation:} To investigate whether the temporal structure of PC inhibition, potentially modulated by IO synchrony via synchronized CS-induced pauses, affects the firing regularity (burstiness vs. regularity) of CN neurons.
+\textit{Calculation:} For each CN neuron \( k \) that fired at least two spikes, the Inter-Spike Intervals (ISIs) were calculated. The Coefficient of Variation (CV) for each neuron was computed as the ratio of the standard deviation of its ISIs (\( \sigma_{ISI_k} \)) to its mean ISI (\( \mu_{ISI_k} \)):
+\begin{equation}
+CV_{k} = \frac{\sigma_{ISI_k}}{\mu_{ISI_k}}
+\end{equation}
+The average CV, \( \overline{CV} \), was calculated across all CN neurons for which a CV could be computed. \( CV > 1 \) suggests bursty firing, while \( CV < 1 \) suggests regular firing.
+
+\subsubsection{CN Population Firing Synchrony}
+\textit{Motivation:} To measure the degree of coincident firing among CN neurons, which might be influenced by synchronized disinhibition from PCs.
+\textit{Calculation:} Spike trains from all \( N_{CN} \) CN neurons were binned into small time windows (e.g., \( \Delta t = 10 \) ms), creating a matrix of spike counts per bin for each neuron. The average pairwise Pearson correlation coefficient \( \bar{\rho}_{CN} \) was calculated between the binned spike counts of all unique pairs of CN neurons, analogous to Equation (3) but applied to binned CN spike counts.
+
+\subsubsection{Population Rate Rhythmicity (PC \& CN)}
+\textit{Motivation:} To quantify the extent to which the characteristic IO rhythm (typically 4-12 Hz), when present and synchronized, entrains the overall firing activity of downstream PC and CN populations.
+\textit{Calculation:} The population firing rate \( P(t) \) was calculated for both PC and CN populations by summing spikes across all respective neurons within small time bins (e.g., 5 ms) and converting to Hz. The Power Spectral Density \( S(f) \) of \( P(t) \) was computed using FFT. The relative power \( P_{rel} \) in the typical IO frequency band (e.g., 4-12 Hz) was calculated as the ratio of power integrated within that band to the power integrated over a wider analysis band (e.g., 1-50 Hz):
+\begin{equation}
+P_{rel} = \frac{\sum_{f \in [4, 12 \text{Hz}]} S(f)}{\sum_{f \in [1, 50 \text{Hz}]} S(f)}
+\end{equation}
+where the summation occurs over the discrete frequency bins from the FFT falling within the specified ranges. Higher \( P_{rel} \) indicates stronger entrainment by the IO rhythm.
+
+\end{document}
