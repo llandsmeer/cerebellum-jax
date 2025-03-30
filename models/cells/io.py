@@ -332,7 +332,9 @@ class IONeuron(bp.dyn.NeuDyn):
             Gap junction currents for each cell
         """
         vdiff = bm.subtract(bm.take(V_dend, gj_src), bm.take(V_dend, gj_tgt))
-        cx36_current_per_gj = (0.2 + 0.8 * bm.exp(-vdiff * vdiff / 100)) * vdiff * g_gj
+        cx36_current_per_gj = (
+            (0.6 * bm.exp(-(vdiff * vdiff) / 2500.0) + 0.4) * vdiff * g_gj
+        )
 
         I_gj = bm.zeros_like(V_dend)
         for i in range(len(gj_tgt)):

@@ -327,8 +327,21 @@ class CerebellarNetwork(bp.DynSysGroup):
             p2=bm.random.normal(
                 0.15, 0.01, num_io
             ),  # Cell surface ratio axon(hillock)/soma - no unit given
+            # --- OU Parameters for IO Neurons (Currently set to zero) ---
+            I_OU0=bm.asarray(kwargs.get("IO_I_OU0", -0.0)),
+            tau_OU=bm.asarray(kwargs.get("IO_tau_OU", 50.0)),
+            sigma_OU=bm.asarray(kwargs.get("IO_sigma_OU", 0.3)),
         )
-        self.io = IONetwork(num_neurons=num_io, g_gj=0.05, nconnections=10, **io_params)
+        # --- Set Correct Gap Junction Conductance ---
+        io_g_gj = 0.05  # Value from paper (mS/cm2)
+
+        # Pass io_params and correct g_gj to IONetwork constructor
+        self.io = IONetwork(
+            num_neurons=num_io,
+            g_gj=io_g_gj,  # <<< Use correct value
+            nconnections=10,
+            **io_params,
+        )
 
         # Update PF Bundle parameters using Table 1 values if provided, else defaults
         pf_params = {
