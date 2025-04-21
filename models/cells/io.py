@@ -258,9 +258,9 @@ class IONeuron(bp.dyn.NeuDyn):
             (0.6 * bm.exp(-(vdiff * vdiff) / 2500.0) + 0.4) * vdiff * g_gj
         )
 
-        I_gj = bm.zeros_like(V_dend)
-        for i in range(len(gj_tgt)):
-            I_gj = I_gj.at[gj_tgt[i]].add(cx36_current_per_gj[i])
+        I_gj = bm.zeros_like(V_dend) \
+            .at[jax.numpy.array(gj_tgt)] \
+            .add(cx36_current_per_gj)
 
         return I_gj
 
