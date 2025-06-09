@@ -1,0 +1,122 @@
+<mujoco model="simple_mouse">
+    <compiler angle="degree" inertiafromgeom="true"
+    coordinate="local"
+        />
+    <option gravity="0 0 -9.81e-3" timestep="0.00125" iterations="100" />
+
+    <custom>
+      <numeric data="2000" name="constraint_stiffness"/>
+      <numeric data="1000" name="constraint_limit_stiffness"/>
+      <numeric data="0" name="constraint_ang_damping"/>
+      <numeric data="0" name="constraint_vel_damping"/>
+      <numeric data="0.5" name="joint_scale_pos"/>
+      <numeric data="30" name="matrix_inv_iterations"/>
+      <numeric data="0.2" name="joint_scale_ang"/>
+      <numeric data="0.0" name="ang_damping"/>
+      <numeric data="0." name="spring_mass_scale"/>
+      <numeric data="0." name="spring_inertia_scale"/>
+      <numeric data="15" name="solver_maxls"/>
+      <numeric data="1" name="baumgarte_erp"/>
+    </custom>
+
+    <default>
+        <joint armature="0.00001" damping="0.000001" limited="false"
+          margin="10"
+          solreflimit="0.2 1"
+          solimplimit="0.0 0.8 0.1 0.5 2"
+            />
+      <geom contype="0" conaffinity="1" condim="3"
+          density="0.0"
+          friction="0 0.00 0"
+          solref="0.2 1"
+          solimp="0.0 0.8 10 0.5 2"
+          rgba="0.2 0.2 0.2 1.0"/>
+         <!-- d0 dw w m p-->
+      <motor ctrllimited="true" ctrlrange="-1 1"/>
+    </default>
+
+    <size nstack="3000"/>
+
+    <worldbody>
+        <!-- Backbone -->
+        <body name="mouse" pos="0 0 0.05">
+            <geom name="spine" type="capsule" fromto="0 0 0 0.057 0 0" size="0.004" mass="0.005"/>
+            <!--
+            <geom name="head" type="capsule" fromto="0.063 0 0 0.085 0 0" size="0.012" mass="0"/>
+                -->
+            <geom name="tail" type="capsule" fromto="0.0 0 0 -0.085 0 0" size="0.002" mass="0"/>
+
+            <!-- Left Hindlimb -->
+            <body pos="0 -0.01 0">
+                <joint name="lhip" type="hinge" axis="0 1 0" range="-50 30"/>
+                <geom type="capsule" fromto="0 0 0 0 0 -0.022" size="0.002"                 mass="0.003"/>
+                <body pos="0 0 -0.022">
+                    <joint name="lknee" type="hinge" axis="0 1 0" range="40 145"/>
+                    <geom type="capsule" fromto="0 0 0 0 0 -0.025" size="0.002"             mass="0.002"/>
+                    <body pos="0 0 -0.025">
+                        <joint name="lankle" type="hinge" axis="0 1 0" range="-140 -40"/>
+                        <geom type="capsule" fromto="0 0 0 0 0 0.019" size="0.002"          mass="0.002"/>
+                    </body>
+                </body>
+            </body>
+
+            <!-- Right Hindlimb -->
+            <body pos="0 +0.01 0">
+                <joint name="rhip" type="hinge" axis="0 1 0" range="-50 30"/>
+                <geom type="capsule" fromto="0 0 0 0 0 -0.022" size="0.002"                 mass="0.003"/>
+                <body pos="0 0 -0.022">
+                    <joint name="rknee" type="hinge" axis="0 1 0" range="40 145"/>
+                    <geom type="capsule" fromto="0 0 0 0 0 -0.025" size="0.002"             mass="0.002"/>
+                    <body pos="0 0 -0.025">
+                        <joint name="rankle" type="hinge" axis="0 1 0" range="-140 -40"/>
+                        <geom type="capsule" fromto="0 0 0 0 0 0.019" size="0.002"          mass="0.002"/>
+                    </body>
+                </body>
+            </body>
+
+            <!-- Left Forelimb -->
+            <body pos="0.057 -0.01 -0.006">
+                <joint name="lshoulder" type="hinge" axis="0 1 0" range="-14 40"/>
+                <geom type="capsule" fromto="0 0 0 0 0 -0.013" size="0.002"                 mass="0.003"/>
+                <body pos="0 0 -0.013">
+                    <joint name="lelbow" type="hinge" axis="0 1 0" range="-153 -60"/>
+                    <geom type="capsule" fromto="0 0 0 0 0 -0.017" size="0.002"             mass="0.002"/>
+                    <body pos="0 0 -0.017">
+                        <joint name="lwrist" type="hinge" axis="0 1 0" range="-20 50"/>
+                        <geom type="capsule" fromto="0 0 0 0 0 -0.010" size="0.002"         mass="0.002"/>
+                    </body>
+                </body>
+            </body>
+
+            <!-- Right Forelimb -->
+            <body pos="0.057 +0.01 -0.006">
+                <joint name="rshoulder" type="hinge" axis="0 1 0" range="-14 40"/>
+                <geom type="capsule" fromto="0 0 0 0 0 -0.013" size="0.002"                 mass="0.003"/>
+                <body pos="0 0 -0.013">
+                    <joint name="relbow" type="hinge" axis="0 1 0" range="-153 -60"/>
+                    <geom type="capsule" fromto="0 0 0 0 0 -0.017" size="0.002"             mass="0.002"/>
+                    <body pos="0 0 -0.017">
+                        <joint name="rwrist" type="hinge" axis="0 1 0" range="-50 50"/>
+                        <geom type="capsule" fromto="0 0 0 0 0 -0.010" size="0.002"         mass="0.002"/>
+                    </body>
+                </body>
+            </body>
+
+        </body>
+    </worldbody>
+
+  <actuator>
+    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="lhip" gear="150"/>
+    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="lknee" gear="150"/>
+    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="lankle" gear="150"/>
+    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="rhip" gear="150"/>
+    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="rknee" gear="150"/>
+    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="rankle" gear="150"/>
+    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="lshoulder" gear="150"/>
+    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="lelbow" gear="150"/>
+    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="lwrist" gear="150"/>
+    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="rshoulder" gear="150"/>
+    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="relbow" gear="150"/>
+    <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="rwrist" gear="150"/>
+  </actuator>
+</mujoco>
