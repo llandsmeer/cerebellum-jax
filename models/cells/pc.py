@@ -95,6 +95,7 @@ class PurkinjeCell(bp.dyn.NeuDyn):
 
         # Store individual terms for debugging
         I_total = self.I_intrinsic + self.input.value
+        self.input[:] = 0
         self.dbg_leak.value = self.gL * (self.EL - V)
         self.dbg_exp.value = self.gL * self.DeltaT * bm.exp((V - self.VT) / self.DeltaT)
         self.dbg_current.value = I_total

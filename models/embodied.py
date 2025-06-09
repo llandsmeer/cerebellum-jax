@@ -12,6 +12,28 @@ import json
 from models import network
 from models.mouse.eigenmode import Body
 
+class AnglesToPC(bp.dyn.SynConn):
+    def __init__(self, pre: Body, post, conn: bp.conn.IJConn, **kwargs):
+        super().__init__(pre=pre, post=post, conn=conn, name=kwargs.get("name"))
+        self.weights = bm.Variable(kwargs['weights'])  # shape: (num_pc, num_pf)
+        self.pre_indices_flat = self.conn.require('pre_ids')
+        self.post_indices_flat = self.conn.require('post_ids')  # shape: (num_connections,)
+        self.num_connections = len(self.pre_indices_flat)
+        if len(self.pre_indices_flat) != len(self.post_indices_flat):
+            raise ValueError('PFtoPC connection error: pre_ids and post_ids length mismatch.')
+
+    def update(self):
+        pre_I = self.pre.output
+        pre_I_per_conn = bm.take(pre_I, self.pre_indices_flat)
+        weights_per_conn = self.weights[self.post_indices_flat, self.pre_indices_flat]
+        contribution_per_conn = ((1 / 24.0) * weights_per_conn * pre_I_per_conn)
+        total_input = bm.segment_sum(
+            contribution_per_conn,
+            self.post_indices_flat,
+            num_segments=self.post.num,
+        )
+        self.post.input.value += total_input  # shape: (num_pc,)
+
 class Mouse(bp.DynSysGroup):
     def __init__(self, num_pf_bundles=5, num_pc=100, num_cn=40, num_io=64, **kwargs):
         super(Mouse, self).__init__()
@@ -125,6 +147,8 @@ class Mouse(bp.DynSysGroup):
         io_params = {**ionet_params, **io_neuron_params}
         self.io = network.IONetwork(num_neurons=num_io, **io_params)
 
+        self.body = Body()
+
         # --- Create Connectivity --- #
         pfpc_pre, pfpc_post, pfpc_weights = network.generate_pf_pc_connectivity(
             num_pf_bundles, num_pc
@@ -143,6 +167,11 @@ class Mouse(bp.DynSysGroup):
 
         # --- Create Synapses --- #
         self.pf_to_pc = network.PFtoPC(pre=self.pf, post=self.pc, conn=pfpc_conn, **pfpc_params)
+
+        pre, post, weights = network.generate_pf_pc_connectivity(24, num_pc)
+        conn = bp.conn.IJConn(pre, post)
+
+        self.body_to_pc = AnglesToPC(pre=self.body, post=self.pc, conn=conn, weights=weights)
         self.pc_to_cn = network.PCToCN(pre=self.pc, post=self.cn, conn=pccn_conn, **pccn_params)
         self.cn_to_io = network.CNToIO(
             pre=self.cn, post=self.io.neurons, conn=cnio_conn, **cnio_params
@@ -150,7 +179,6 @@ class Mouse(bp.DynSysGroup):
         self.io_to_pc = network.IOToPC(
             pre=self.io.neurons, post=self.pc, conn=iopc_conn, **iopc_params
         )
-        self.body = Body()
 
 def main():
     seed = 0
@@ -163,24 +191,28 @@ def main():
     monitors = {
         'pc': net.pc.spike,
         'cn': net.cn.spike,
-        'io': net.io.spike,
+        #'io': net.io.spike,
         'vio': net.io.neurons.V_soma,
         'body': net.body.state
     }
 
     dt = 0.025
-    duration = 1000
+    duration = 5000
     runner = bp.DSRunner(net, monitors=monitors, dt=dt)
     runner.progress_bar = False
     runner._fun_predict = bm.jit(runner._fun_predict)
+    print('start')
     runner.run(duration)
+    print('end')
 
     pc = [list(map(float, dt*np.where(n)[0])) for n in runner.mon['pc'].T]
     cn = [list(map(float, dt*np.where(n)[0])) for n in runner.mon['cn'].T]
-    io = [list(map(float, dt*np.where(n)[0])) for n in runner.mon['io'].T]
-    spike_data = json.dumps(dict(pc=pc, cn=cn))
+    io = (np.diff((runner.mon['vio'] > 0).astype(int)) == 1)
+    io = [list(map(float, dt*np.where(n)[0])) for n in io.T]
+    #io = [list(map(float, dt*np.where(n)[0])) for n in runner.mon['io'].T]
+    spike_data = json.dumps(dict(pc=pc, cn=cn, io=io))
 
-    net.body.render(runner.mon['body'], fn='render.html', js='''
+    net.body.render(runner.mon['body'], fn='render.html', height=400, subsample=40, js='''
     let anim = document.viewer.animator
     const dd = document.createElement('div');
     const canvas = document.createElement('canvas');

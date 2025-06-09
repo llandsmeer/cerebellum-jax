@@ -41,6 +41,7 @@ class PFBundles(bp.dyn.NeuDyn):
 class PFtoPC(bp.dyn.SynConn):
     def __init__(self, pre, post, conn: bp.conn.IJConn, **kwargs):
         super().__init__(pre=pre, post=post, conn=conn, name=kwargs.get("name"))
+        self.add = kwargs.get('add', False)
 
         self.weights = bm.Variable(kwargs["weights"])  # shape: (num_pc, num_pf)
 
@@ -84,7 +85,10 @@ class PFtoPC(bp.dyn.SynConn):
             self.post_indices_flat,  # Segment IDs
             num_segments=self.post.num,
         )  # Output shape: (num_pc,)
-        self.post.input.value = total_input  # shape: (num_pc,)
+        if self.add:
+            self.post.input.value += total_input  # shape: (num_pc,)
+        else:
+            self.post.input.value = total_input  # shape: (num_pc,)
 
 
 class PCToCN(bp.dyn.SynConn):

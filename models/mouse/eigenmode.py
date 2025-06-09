@@ -1,5 +1,5 @@
 import os
-os.environ['JAX_PLATFORMS'] = 'cpu'
+# os.environ['JAX_PLATFORMS'] = 'cpu'
 
 import brainpy as bp
 import brainpy.math as bm
@@ -12,7 +12,7 @@ from brax.generalized import pipeline
 
 class Body(bp.dyn.NeuDyn):
     def __init__(self):
-        super().__init__(size=12)
+        super().__init__(size=24)
         try:
             self.sys = mjcf.load('mouse-free.xml')
         except:
@@ -21,8 +21,8 @@ class Body(bp.dyn.NeuDyn):
         self.state = bm.Variable(
                 pipeline.init(self.sys,
                   jnp.pi/180*jnp.array(
-                      [0., +100., 0.]*2 +
-                      [0., -100., 0.]*2
+                      [10., +100., 0., 0., +100., 0.] +
+                      [0., -100., 0., 10., -100., 0.],
                               ),
                     jnp.zeros_like(self.sys.init_q))
                 )
@@ -32,13 +32,15 @@ class Body(bp.dyn.NeuDyn):
 
     @property
     def output(self):
-        breakpoint()
         angle0 = jnp.array([-60., 110., 60.,]*2 + [60., -100., -30.]*2)
         x = angle0 - self.angle
-        return 0.001 * jnp.concatenate([
-            jax.nn.relu(+ x),
-            jax.nn.relu(- x)
+        out = 0.1 * jnp.concatenate([
+            #jax.nn.relu(+ x),
+            #jax.nn.relu(- x)
+            (+ x),
+            (- x)
             ])
+        return out
 
     def update(self):
         dt = bp.share['dt'] * 1e-3 # ms to s
@@ -48,14 +50,15 @@ class Body(bp.dyn.NeuDyn):
         action = 1e-6 * -(self.angle-angle0)
         self.state.value = pipeline.step(sys, self.state.value, action) # type:ignore
         return self.state
-    def render(self, mon, fn='index.html', height=840, js=''):
-        states = [jax.tree_util.tree_map(lambda x: x[i], mon) for i in range(mon.q.shape[0])]
-        states_nonnan = [x for x in states if not any(jnp.isnan(x.q))]
-        if len(states) != len(states_nonnan):
-            print('nanstates, only showing', len(states_nonnan), 'out of', len(states))
-        states = states_nonnan
+    def render(self, mon, fn='index.html', height=840, js='', subsample=1):
+        states = [jax.tree_util.tree_map(lambda x: x[i], mon) for i in range(mon.q.shape[0])][::subsample]
+        if any(jnp.isnan(states[-1].q)):
+            states_nonnan = [x for x in states if not any(jnp.isnan(x.q))]
+            if len(states) != len(states_nonnan):
+                print('nanstates, only showing', len(states_nonnan), 'out of', len(states))
+            states = states_nonnan
         with open(fn, 'w') as f:
-            sys = self.sys.replace(opt=self.sys.opt.replace(timestep=self.dt))
+            sys = self.sys.replace(opt=self.sys.opt.replace(timestep=self.dt*subsample))
             doc = html.render(sys, states, height=height)
             doc = doc.replace('var viewer = new Viewer(domElement, system);',
                               'var viewer = new Viewer(domElement, system); document.viewer=viewer; ' + js)
