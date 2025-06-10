@@ -2,7 +2,7 @@ import sys
 
 sys.path.append('/home/llandsmeer/repos/llandsmeer/cerebellum-jax')
 
-import warnings
+import itertools
 import numpy as np
 import brainpy as bp
 import brainpy.math as bm
@@ -147,7 +147,7 @@ class Mouse(bp.DynSysGroup):
         io_params = {**ionet_params, **io_neuron_params}
         self.io = network.IONetwork(num_neurons=num_io, **io_params)
 
-        self.body = Body()
+        self.body = Body(delta=kwargs.get('delta', None))
 
         # --- Create Connectivity --- #
         pfpc_pre, pfpc_post, pfpc_weights = network.generate_pf_pc_connectivity(
@@ -180,13 +180,15 @@ class Mouse(bp.DynSysGroup):
             pre=self.io.neurons, post=self.pc, conn=iopc_conn, **iopc_params
         )
 
-def main():
+def go(i, delta):
     seed = 0
 
     np.random.seed(seed)
     bm.random.seed(seed)
 
-    net = Mouse()
+    print('constructing model.... ', end='', flush=True)
+    net = Mouse(delta=delta)
+    print('done')
 
     monitors = {
         'pc': net.pc.spike,
@@ -197,13 +199,24 @@ def main():
     }
 
     dt = 0.025
-    duration = 5000
+    duration = 10000
     runner = bp.DSRunner(net, monitors=monitors, dt=dt)
     runner.progress_bar = False
     runner._fun_predict = bm.jit(runner._fun_predict)
-    print('start')
+    print('running model.... ', end='', flush=True)
     runner.run(duration)
-    print('end')
+    print('done')
+
+    print('saving data.... ', end='', flush=True)
+    np.savez(f'out/{i:04d}',
+             delta=delta,
+             pc=runner.mon['pc'],
+             cn=runner.mon['cn'],
+             vio=runner.mon['vio'],
+             q=runner.mon['body'].q,
+             qd=runner.mon['body'].qd
+             )
+    print('done')
 
     pc = [list(map(float, dt*np.where(n)[0])) for n in runner.mon['pc'].T]
     cn = [list(map(float, dt*np.where(n)[0])) for n in runner.mon['cn'].T]
@@ -212,7 +225,8 @@ def main():
     #io = [list(map(float, dt*np.where(n)[0])) for n in runner.mon['io'].T]
     spike_data = json.dumps(dict(pc=pc, cn=cn, io=io))
 
-    net.body.render(runner.mon['body'], fn='render.html', height=400, subsample=40, js='''
+    print('rendering.... ', end='', flush=True)
+    net.body.render(runner.mon['body'], fn=f'render_{i:04d}.html', height=400, subsample=40, js='''
     let anim = document.viewer.animator
     const dd = document.createElement('div');
     const canvas = document.createElement('canvas');
@@ -253,8 +267,17 @@ def main():
     }
     renderneuro()
     '''.replace('SPIKE_DATA', spike_data))
+    print('done')
 
     return runner
+
+def main():
+    deltas = list(itertools.product(*(12*[[-1,1]])))
+    for i, delta in enumerate(deltas):
+        print('#'*10, i, '#'*10)
+        print(delta)
+        go(i, delta)
+    # delta = [-1, -1, -1, 1, 1, 1, 1, 1, 1, -1, -1, -1]
 
 if __name__ == '__main__':
     main()

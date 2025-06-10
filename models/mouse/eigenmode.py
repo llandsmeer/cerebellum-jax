@@ -11,21 +11,22 @@ from brax.io import html
 from brax.generalized import pipeline
 
 class Body(bp.dyn.NeuDyn):
-    def __init__(self):
+    def __init__(self, delta=None):
         super().__init__(size=24)
         try:
             self.sys = mjcf.load('mouse-free.xml')
         except:
             path = os.path.join(os.path.dirname(__file__), 'mouse-free.xml')
             self.sys = mjcf.load(path)
+        angle0 = jnp.array([-60., 110., 60.,]*2 + [60., -100., -30.]*2)
+        if delta is None:
+            delta  = 10 * jnp.array([-1, -1, -1, 1, 1, 1, 1, 1, 1, -1, -1, -1])
+        else:
+            delta  = 10 * jnp.array([delta])
         self.state = bm.Variable(
                 pipeline.init(self.sys,
-                  jnp.pi/180*jnp.array(
-                      [10., +100., 0., 0., +100., 0.] +
-                      [0., -100., 0., 10., -100., 0.],
-                              ),
-                    jnp.zeros_like(self.sys.init_q))
-                )
+                  jnp.pi/180*(angle0 + delta),
+                  jnp.zeros_like(self.sys.init_q)))
     @property
     def angle(self):
         return self.state.value.q * 180 / jnp.pi # type: ignore
